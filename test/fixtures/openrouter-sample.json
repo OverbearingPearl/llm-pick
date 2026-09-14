@@ -1,0 +1,43 @@
+{
+  "source": "openrouter",
+  "updated": "2026-09-01",
+  "note": "Illustrative sample prices in USD per million tokens; not real quotes.",
+  "models": [
+    {
+      "id": "anthropic/claude-3.5-sonnet",
+      "name": "Anthropic: Claude 3.5 Sonnet",
+      "provider_ids": { "openrouter": "anthropic/claude-3.5-sonnet" },
+      "pricing": { "prompt": 3.0, "completion": 15.0 }
+    },
+    {
+      "id": "openai/gpt-4o",
+      "name": "OpenAI: GPT-4o",
+      "provider_ids": { "openrouter": "openai/gpt-4o", "openai": "gpt-4o" },
+      "pricing": { "prompt": 5.0, "completion": 15.0 }
+    },
+    {
+      "id": "openai/gpt-4o-mini",
+      "name": "OpenAI: GPT-4o mini",
+      "provider_ids": { "openrouter": "openai/gpt-4o-mini" },
+      "pricing": { "prompt": 0.15, "completion": 0.6 }
+    },
+    {
+      "id": "google/gemini-flash-1.5",
+      "name": "Google: Gemini Flash 1.5",
+      "provider_ids": { "openrouter": "google/gemini-flash-1.5" },
+      "pricing": { "prompt": 0.075, "completion": 0.3 }
+    },
+    {
+      "id": "meta-llama/llama-3.1-8b-instruct",
+      "name": "Meta: Llama 3.1 8B Instruct",
+      "provider_ids": { "openrouter": "meta-llama/llama-3.1-8b-instruct" },
+      "pricing": { "prompt": 0.05, "completion": 0.1 }
+    },
+    {
+      "id": "qwen/qwen-2.5-72b",
+      "name": "Qwen 2.5 72B",
+      "provider_ids": { "openrouter": "qwen/qwen-2.5-72b" },
+      "pricing": { "prompt": 0.35, "completion": 0.4 }
+    }
+  ]
+}

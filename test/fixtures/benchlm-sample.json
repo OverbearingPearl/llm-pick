@@ -1,0 +1,40 @@
+{
+  "source": "benchlm",
+  "updated": "2026-09-01",
+  "note": "Illustrative sample data for llm-pick; not real benchmark results.",
+  "models": [
+    {
+      "id": "claude-3.5-sonnet",
+      "name": "Claude 3.5 Sonnet",
+      "provider_ids": { "anthropic": "claude-3-5-sonnet-20241022" },
+      "scores": { "coding": 88, "math": 80 }
+    },
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "provider_ids": { "openai": "gpt-4o" },
+      "scores": { "coding": 92, "math": 90 }
+    },
+    {
+      "id": "gpt-4o-mini",
+      "name": "GPT-4o mini",
+      "provider_ids": { "openai": "gpt-4o-mini" },
+      "scores": { "coding": 78, "math": 70 }
+    },
+    {
+      "id": "gemini-1.5-flash",
+      "name": "Gemini 1.5 Flash",
+      "scores": { "coding": 82, "math": 84 }
+    },
+    {
+      "id": "llama-3.1-8b",
+      "name": "Llama 3.1 8B",
+      "scores": { "coding": 65, "math": 60 }
+    },
+    {
+      "id": "orphan-model",
+      "name": "Orphan Model",
+      "scores": { "coding": 70, "math": 70 }
+    }
+  ]
+}
