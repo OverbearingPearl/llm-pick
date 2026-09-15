@@ -169,15 +169,19 @@ now."
 (defun llm-pick-test-run ()
   "Reload the modules and run the whole llm-pick test suite."
   (interactive)
-  (llm-pick-test--reload)
-  ;; The suite must not open a socket.  Every test that collects binds
-  ;; `llm-pick-source-offline' itself and this binding is the net under the test
-  ;; that forgets: a run that reaches a service is slow, is not
-  ;; reproducible, and blocked this command outright once.
-  (let ((llm-pick-source-offline t))
-    (if noninteractive
-        (ert-run-tests-batch-and-exit t)
-      (ert t))))
+  (let ((dir default-directory))
+    (llm-pick-test--reload)
+    ;; The suite must not open a socket.  Every test that collects binds
+    ;; `llm-pick-source-offline' itself and this binding is the net under the test
+    ;; that forgets: a run that reaches a service is slow, is not
+    ;; reproducible, and blocked this command outright once.
+    (let ((llm-pick-source-offline t))
+      (when (get-buffer "*ert*")
+        (kill-buffer "*ert*"))
+      (let ((default-directory dir))
+        (if noninteractive
+            (ert-run-tests-batch-and-exit "llm-pick-")
+          (ert "llm-pick-"))))))
 
 (provide 'llm-pick-test)
 
