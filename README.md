@@ -6,11 +6,16 @@ canonical ID, and hands you the records — or the one model — to act on.
 
 ## Quick start
 
+Run `M-x llm-pick` for the main entry point. One command fetches every
+registered source (with a 24-hour cache, so repeated calls do not
+re-download), shows every model grouped into shared sections and
+per-source sections, and lets you open a model view with RET, then
+compare/diff views from there.
+
+Programmatic use:
+
 ```elisp
 (require 'llm-pick)
-
-;; See the models the sources know about.
-(llm-pick-report)
 
 ;; Find the best model under $3 per million output tokens and call it.
 (let* ((choice (llm-pick-pick :budget 3.0))
@@ -18,15 +23,27 @@ canonical ID, and hands you the records — or the one model — to act on.
   (call-the-api (car target) (cdr target)))
 ```
 
-`M-x llm-pick-menu` puts every command behind one transient menu.
-
 ## Usage
 
-A *source* is a catalogue of model data: `benchlm` for capability, `openrouter` for price, and the two are peers. A *provider* is a channel you can call: `anthropic`, `openai`, `google`, `openrouter` are peers, and `openrouter` is both a source and a provider. A *vendor* is the company that makes the model: Anthropic, OpenAI, DeepSeek. A *family* is the name root of a model line: `claude`, `deepseek`, `gpt`. A *model* is one canonical ID such as `claude-3-5-sonnet`. Price always means the output price in USD per million tokens, because that is the axis the frontier, the ladder and the benchmark bands share; the input price is only ever a column you add (`columns name,or-in,or-out,score`).
+`M-x llm-pick` opens the main view buffer: every model grouped by source coverage, built from fetches cached for 24 hours. The header line shows the cursor motion: `h`/`l` or left/right move between groups, `j`/`k` or down/up move between models, `n`/`p` jump to the next and previous group, `f`/`b` page. `RET` on a model opens the model view, and `q` goes back a level.
 
-Every recipe is `M-x llm-pick-report-query`, or any report command with a prefix argument (`C-u`), followed by one line. TAB completes the words and the values, and an empty line shows every model.
+The UI has three buffer levels.
+
+### Main view
+
+One row per model with its score, its price and a value column that divides the two. Sort keys: `s` by price, `S` by score, `v` by value. `F` opens a filter: a price ceiling and, per category, a score floor, so the ladder shrinks to what is affordable and good enough.
+
+### Model view
+
+Detailed metadata for one model: score breakdown per category, input and output prices across providers, vendor and family, plus keyboard jumps to the compare view and back.
+
+### Compare view
+
+The neighbourhood of one model. It is grouped by family, then by bands of output price ratio to the model itself: cheaper bands at 0.9x, 0.8x and 0.5x, dearer bands at 1.1x, 1.2x and 1.5x. Within a band, models are grouped per category into higher-scoring and lower-scoring than the model, so a model a little dearer but much stronger is visible instead of lost beyond a fixed budget. `c` opens a side-by-side diff buffer of the model and the model under the cursor.
 
 ### One model I half remember
+
+Every report command still accepts a one-line query as the non-interactive path: `M-x llm-pick-report-query`, or any report command with a prefix argument (`C-u`), followed by one line. TAB completes the words and the values, and an empty line shows every model.
 
 ```text
 where name~deepseek-3
@@ -84,7 +101,8 @@ It asks for a baseline matched as loosely as `name~`. It then shows the other mo
 
 ## Status
 
-Version 0.2.0 implements the data path, the reports and the choice.
+Version 0.2.0 implements the data path, the reports, the choice and the
+three-level view (main, model, compare), with a 24-hour cache behind it.
 
 Working:
 
@@ -96,14 +114,19 @@ Working:
 - choosing one model and resolving its provider ID in `lisp/llm-pick-pick.el`
 - rendering a table, CSV, the Pareto frontier or the price ladder in
   `lisp/llm-pick-render-report.el`
+- the interactive views, in `lisp/llm-pick-view.el`: a main view of every
+  model grouped by which sources name them, with `hjkl`/`npfb` cursor motion,
+  RET opening the model view, `q` backing out, `s`/`S`/`v` sorting by
+  price/score/value, `F` filtering, `g` refreshing
 - fetching from BenchLM and OpenRouter over the network, in
-  `lisp/llm-pick-fetch-get.el`
+  `lisp/llm-pick-fetch-get.el`; a refresh fetches from every source at once
+  and the result is cached for 24 hours, so repeats do not re-download
 
 The commands:
 
 | Command | Shows |
 | --- | --- |
-| `M-x llm-pick-menu` | every command below, in a transient menu |
+| `M-x llm-pick` | the main view: every model, grouped by which sources name them |
 | `M-x llm-pick-report` | a table of the models a query selects |
 | `M-x llm-pick-report-query` | the same, asking for the query first |
 | `M-x llm-pick-report-frontier` | the Pareto frontier with the gain of every step up |
@@ -116,7 +139,10 @@ The commands:
 | `M-x llm-pick-align-check` | every ID problem of a run at once, grouped by kind |
 | `M-x llm-pick-test-run` | the ERT suite |
 
-`M-x llm-pick-menu` needs the package loaded; `(require 'llm-pick)` or any of
+In the main view, RET opens the model view and `q` backs out one level.  `g`
+forces a re-download; without it, data comes from the 24-hour cache.
+
+`M-x llm-pick` needs the package loaded; `(require 'llm-pick)` or any of
 the commands above loads it.  A report command asks for nothing: `M-x
 llm-pick-report` shows every model straight away.  With a prefix argument it
 reads a query on one line first, which is what `M-x llm-pick-report-query`
@@ -677,8 +703,8 @@ own.  Set `llm-pick-align-match-consensus-band` to `0` to turn the rule off.
 | `llm-pick-source-offline` | `nil` | read the offline snapshots instead of the services |
 | `llm-pick-source-openrouter-api-key` | `nil` | bearer token for OpenRouter; nil reads `OPENROUTER_API_KEY` |
 | `llm-pick-normalize-rules` | 11 rules | ID normalization, see above |
-| `llm-pick-render-marginal-threshold` | `2.0` | points per dollar below which a frontier step is marked `!` and named as not worth its price |
-| `llm-pick-render-default-bar-width` | `30` | width of the capability bar in a report |
+| `llm-pick-render-report-marginal-threshold` | `2.0` | points per dollar below which a frontier step is marked `!` and named as not worth its price |
+| `llm-pick-render-report-default-bar-width` | `30` | width of the capability bar in a report |
 | `llm-pick-report-columns` | `(name bar score or-out)` | columns of a `table` report |
 | `llm-pick-report-ladder-bounds` | `(0.5 1 2 5 nil)` | price buckets of a `ladder` report |
 | `llm-pick-report-benchmark-bands` | `(0.5 0.8 1.25 2.0 nil)` | output price ratios of a `benchmark` report, against the baseline's own output price |
