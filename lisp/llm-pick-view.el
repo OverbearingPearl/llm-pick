@@ -173,7 +173,8 @@ BODY is a function inserting the buffer content."
     (funcall body)
     (goto-char (point-min))
     (setq llm-pick-view--kind kind
-          header-line-format (llm-pick-view--header-line kind))))
+          header-line-format (llm-pick-view--header-line kind))
+    (setq buffer-read-only t)))
 
 (defun llm-pick-view--header-line (kind)
   "Return the key hint for the header line of a view of KIND."
@@ -235,7 +236,7 @@ BODY is a function inserting the buffer content."
     (define-key map "k" 'llm-pick-view-previous)
     (define-key map "f" 'llm-pick-view-forward-section)
     (define-key map "b" 'llm-pick-view-backward-section)
-    (define-key map "RET" 'llm-pick-view-ret)
+    (define-key map (kbd "RET") 'llm-pick-view-ret)
     (define-key map "q" 'llm-pick-view-quit)
     (define-key map "g" 'llm-pick-view-refresh)
     (define-key map "s" 'llm-pick-view-sort-price)
@@ -252,8 +253,7 @@ BODY is a function inserting the buffer content."
 
 (define-derived-mode llm-pick-view-mode special-mode "llm-pick-view"
   "Major mode of the llm-pick main, model and compare views."
-  (setq-local truncate-lines t)
-  (setq buffer-read-only t))
+  (setq-local truncate-lines t))
 
 ;;; Main view
 
