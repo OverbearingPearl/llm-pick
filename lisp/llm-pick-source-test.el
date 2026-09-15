@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;;
-;; The tests run against the offline snapshots in test/fixtures, so they
+;; The tests run against the offline snapshots in a temporary directory the tests write, so they
 ;; never touch the network and never depend on the user configuration of
 ;; the running Emacs.
 
@@ -13,9 +13,98 @@
 (require 'llm-pick-source)
 
 (defconst llm-pick-source-test--fixture-directory
-  (expand-file-name "../test/fixtures"
-                    (file-name-directory (or load-file-name buffer-file-name)))
-  "Directory holding the snapshots used by these tests.")
+  (let ((directory (make-temp-file "llm-pick-source-test-" t)))
+    (dolist (snapshot
+             '(("benchlm-sample.json" .
+                "{
+  \"note\": \"Illustrative sample data; not real benchmark results.\",
+  \"models\": [
+    {
+      \"id\": \"claude-3.5-sonnet\",
+      \"name\": \"Claude 3.5 Sonnet\",
+      \"provider_ids\": { \"anthropic\": \"claude-3-5-sonnet-20241022\" },
+      \"scores\": { \"coding\": 88, \"math\": 80 }
+    },
+    {
+      \"id\": \"gpt-4o\",
+      \"name\": \"GPT-4o\",
+      \"provider_ids\": { \"openai\": \"gpt-4o\" },
+      \"scores\": { \"coding\": 92, \"math\": 90 }
+    },
+    {
+      \"id\": \"gpt-4o-mini\",
+      \"name\": \"GPT-4o mini\",
+      \"provider_ids\": { \"openai\": \"gpt-4o-mini\" },
+      \"scores\": { \"coding\": 78, \"math\": 70 }
+    },
+    {
+      \"id\": \"gemini-1.5-flash\",
+      \"name\": \"Gemini 1.5 Flash\",
+      \"scores\": { \"coding\": 82, \"math\": 84 }
+    },
+    {
+      \"id\": \"llama-3.1-8b\",
+      \"name\": \"Llama 3.1 8B\",
+      \"scores\": { \"coding\": 65, \"math\": 60 }
+    },
+    {
+      \"id\": \"orphan-model\",
+      \"name\": \"Orphan Model\",
+      \"scores\": { \"coding\": 70, \"math\": 70 }
+    }
+  ]
+}")
+               ("openrouter-sample.json" .
+                "{
+  \"note\": \"Illustrative sample prices; not real quotes.\",
+  \"models\": [
+    {
+      \"id\": \"anthropic/claude-3.5-sonnet\",
+      \"name\": \"Anthropic: Claude 3.5 Sonnet\",
+      \"provider_ids\": { \"openrouter\": \"anthropic/claude-3.5-sonnet\" },
+      \"pricing\": { \"prompt\": 3.0, \"completion\": 15.0 }
+    },
+    {
+      \"id\": \"openai/gpt-4o\",
+      \"name\": \"OpenAI: GPT-4o\",
+      \"provider_ids\": {
+        \"openrouter\": \"openai/gpt-4o\", \"openai\": \"gpt-4o\" },
+      \"pricing\": { \"prompt\": 5.0, \"completion\": 15.0 }
+    },
+    {
+      \"id\": \"openai/gpt-4o-mini\",
+      \"name\": \"OpenAI: GPT-4o mini\",
+      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o-mini\" },
+      \"pricing\": { \"prompt\": 0.15, \"completion\": 0.6 }
+    },
+    {
+      \"id\": \"google/gemini-flash-1.5\",
+      \"name\": \"Google: Gemini Flash 1.5\",
+      \"provider_ids\": { \"openrouter\": \"google/gemini-flash-1.5\" },
+      \"pricing\": { \"prompt\": 0.075, \"completion\": 0.3 }
+    },
+    {
+      \"id\": \"meta-llama/llama-3.1-8b-instruct\",
+      \"name\": \"Meta: Llama 3.1 8B Instruct\",
+      \"provider_ids\": {
+        \"openrouter\": \"meta-llama/llama-3.1-8b-instruct\" },
+      \"pricing\": { \"prompt\": 0.05, \"completion\": 0.1 }
+    },
+    {
+      \"id\": \"qwen/qwen-2.5-72b\",
+      \"name\": \"Qwen 2.5 72B\",
+      \"provider_ids\": { \"openrouter\": \"qwen/qwen-2.5-72b\" },
+      \"pricing\": { \"prompt\": 0.35, \"completion\": 0.4 }
+    }
+  ]
+}")))
+      (with-temp-file (expand-file-name (car snapshot) directory)
+        (insert (cdr snapshot))))
+    directory)
+  "Directory holding the JSON snapshots these tests read.
+The snapshots are the literals above, written to a temporary directory
+when this file is loaded, so the suite builds the JSON it depends on
+instead of shipping snapshot files.")
 
 (defconst llm-pick-source-test--fixture
   (expand-file-name "benchlm-sample.json" llm-pick-source-test--fixture-directory)

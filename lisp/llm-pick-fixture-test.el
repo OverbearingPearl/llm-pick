@@ -4,7 +4,7 @@
 
 ;;
 ;; The built-in sources read their service only: the illustrative
-;; snapshots under test/fixtures belong to the test suite, not to
+;; snapshots under a temporary directory the tests write belong to the test suite, not to
 ;; `llm-pick-source', so the names the suite collects from get a snapshot
 ;; loader here.
 ;;

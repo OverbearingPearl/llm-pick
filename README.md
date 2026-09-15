@@ -423,8 +423,8 @@ substitute for `llm-pick-core-default-capability-source` and
 
 Set `llm-pick-source-offline` to `t` to read the offline snapshots in
 `llm-pick-source-fixture-directory` instead and open no socket at all; the
-snapshots shipped in `test/fixtures` are illustrative samples, not real
-quotes, and the test suite binds that option so it never reaches the network.
+snapshots shipped in that directory are yours to supply, and the test suite writes its own
+samples to a temporary directory, so it never reaches the network.
 A snapshot looks like this:
 
 ```json

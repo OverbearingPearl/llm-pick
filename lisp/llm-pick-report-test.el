@@ -24,9 +24,134 @@
 (require 'llm-pick)
 
 (defconst llm-pick-report-test--fixture-directory
-  (expand-file-name "../test/fixtures"
-                    (file-name-directory (or load-file-name buffer-file-name)))
-  "Directory holding the snapshots used by these tests.")
+  (let ((directory (make-temp-file "llm-pick-report-test-" t)))
+    (dolist (snapshot
+             '(("benchlm-sample.json" .
+                "{
+  \"models\": [
+    {
+      \"id\": \"claude-3.5-sonnet\",
+      \"name\": \"Claude 3.5 Sonnet\",
+      \"provider_ids\": { \"anthropic\": \"claude-3-5-sonnet-20241022\" },
+      \"scores\": { \"coding\": 88, \"math\": 80 }
+    },
+    {
+      \"id\": \"gpt-4o\",
+      \"name\": \"GPT-4o\",
+      \"provider_ids\": { \"openai\": \"gpt-4o\" },
+      \"scores\": { \"coding\": 92, \"math\": 90 }
+    },
+    {
+      \"id\": \"gpt-4o-mini\",
+      \"name\": \"GPT-4o mini\",
+      \"provider_ids\": { \"openai\": \"gpt-4o-mini\" },
+      \"scores\": { \"coding\": 78, \"math\": 70 }
+    },
+    {
+      \"id\": \"gemini-1.5-flash\",
+      \"name\": \"Gemini 1.5 Flash\",
+      \"scores\": { \"coding\": 82, \"math\": 84 }
+    },
+    {
+      \"id\": \"llama-3.1-8b\",
+      \"name\": \"Llama 3.1 8B\",
+      \"scores\": { \"coding\": 65, \"math\": 60 }
+    },
+    {
+      \"id\": \"orphan-model\",
+      \"name\": \"Orphan Model\",
+      \"scores\": { \"coding\": 70, \"math\": 70 }
+    }
+  ]
+}")
+               ("openrouter-sample.json" .
+                "{
+  \"models\": [
+    {
+      \"id\": \"anthropic/claude-3.5-sonnet\",
+      \"name\": \"Anthropic: Claude 3.5 Sonnet\",
+      \"provider_ids\": { \"openrouter\": \"anthropic/claude-3.5-sonnet\" },
+      \"pricing\": { \"prompt\": 3.0, \"completion\": 15.0 }
+    },
+    {
+      \"id\": \"openai/gpt-4o\",
+      \"name\": \"OpenAI: GPT-4o\",
+      \"provider_ids\": {
+        \"openrouter\": \"openai/gpt-4o\", \"openai\": \"gpt-4o\" },
+      \"pricing\": { \"prompt\": 5.0, \"completion\": 15.0 }
+    },
+    {
+      \"id\": \"openai/gpt-4o-mini\",
+      \"name\": \"OpenAI: GPT-4o mini\",
+      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o-mini\" },
+      \"pricing\": { \"prompt\": 0.15, \"completion\": 0.6 }
+    },
+    {
+      \"id\": \"google/gemini-flash-1.5\",
+      \"name\": \"Google: Gemini Flash 1.5\",
+      \"provider_ids\": { \"openrouter\": \"google/gemini-flash-1.5\" },
+      \"pricing\": { \"prompt\": 0.075, \"completion\": 0.3 }
+    },
+    {
+      \"id\": \"meta-llama/llama-3.1-8b-instruct\",
+      \"name\": \"Meta: Llama 3.1 8B Instruct\",
+      \"provider_ids\": {
+        \"openrouter\": \"meta-llama/llama-3.1-8b-instruct\" },
+      \"pricing\": { \"prompt\": 0.05, \"completion\": 0.1 }
+    },
+    {
+      \"id\": \"qwen/qwen-2.5-72b\",
+      \"name\": \"Qwen 2.5 72B\",
+      \"provider_ids\": { \"openrouter\": \"qwen/qwen-2.5-72b\" },
+      \"pricing\": { \"prompt\": 0.35, \"completion\": 0.4 }
+    }
+  ]
+}")
+               ("bedrock-sample.json" .
+                "{
+  \"models\": [
+    {
+      \"id\": \"claude-3.5-sonnet\",
+      \"name\": \"Claude 3.5 Sonnet\",
+      \"provider_ids\": {
+        \"bedrock\": \"anthropic.claude-3-5-sonnet-20241022-v2:0\" },
+      \"pricing\": { \"prompt\": 3.0, \"completion\": 12.0 }
+    },
+    {
+      \"id\": \"gpt-4o\",
+      \"name\": \"GPT-4o\",
+      \"provider_ids\": {
+        \"bedrock\": \"openai.gpt-4o-2024-08-06-v1:0\" },
+      \"pricing\": { \"prompt\": 4.0, \"completion\": 12.0 }
+    },
+    {
+      \"id\": \"gpt-4o-mini\",
+      \"name\": \"GPT-4o mini\",
+      \"provider_ids\": {
+        \"bedrock\": \"openai.gpt-4o-mini-2024-07-18-v1:0\" },
+      \"pricing\": { \"prompt\": 0.2, \"completion\": 0.7 }
+    },
+    {
+      \"id\": \"gemini-1.5-flash\",
+      \"name\": \"Gemini 1.5 Flash\",
+      \"provider_ids\": { \"bedrock\": \"google.gemini-1.5-flash-001\" },
+      \"pricing\": { \"prompt\": 0.08, \"completion\": 0.3 }
+    },
+    {
+      \"id\": \"llama-3.1-8b\",
+      \"name\": \"Llama 3.1 8B\",
+      \"provider_ids\": { \"bedrock\": \"meta.llama3-1-8b-instruct-v1:0\" },
+      \"pricing\": { \"prompt\": 0.04, \"completion\": 0.08 }
+    }
+  ]
+}")))
+      (with-temp-file (expand-file-name (car snapshot) directory)
+        (insert (cdr snapshot))))
+    directory)
+  "Directory holding the JSON snapshots these tests read.
+The snapshots are the literals above, written to a temporary directory
+when this file is loaded, so the suite builds the JSON it depends on
+instead of shipping snapshot files.")
 
 (defconst llm-pick-report-test--second-price-source
   (cons 'bedrock
