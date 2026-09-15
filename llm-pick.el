@@ -116,11 +116,12 @@
   :prefix "llm-pick-")
 
 (defcustom llm-pick-source-fixture-directory
-  (expand-file-name "test/fixtures" llm-pick--directory)
-  "Directory holding the offline snapshots of the built-in sources.
-The snapshots shipped with the repository are illustrative samples, not
-real quotes; point this at your own files to work offline."
-  :type 'directory)
+  nil
+  "Directory holding the offline snapshots of the registered sources.
+A descriptor names its snapshot with :fixture and the name is looked up here;
+nil means no snapshot can be read, the built-in sources being service-only."
+  :type '(choice (const :tag "None" nil)
+                 directory))
 
 (defcustom llm-pick-source-offline nil
   "Whether the built-in sources read their offline snapshots.
@@ -537,7 +538,8 @@ picks the most capable model of all, with no budget and no target
 score.
 ARGS is a plist for `llm-pick-pick'."
   (interactive (llm-pick-query-read-args
-                "Pick query (RET most capable, TAB completes; e.g. budget 3): "))
+                "Pick query (RET most capable, TAB completes; e.g. budget 3 on openrouter): "
+                nil llm-pick-query-read-pick-words))
   (let ((record (llm-pick--pick-record args)))
     (message "%s scores %s and costs $%s/M out"
              (llm-pick-core--field record 'name)

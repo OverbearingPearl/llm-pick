@@ -166,11 +166,35 @@ now."
     (dolist (file (llm-pick-test--test-files))
       (load-file file))))
 
+(defun llm-pick-test--register-sources ()
+  "Register the sources used by the test suite.
+
+The built-in sources read their service only, so the suite supplies
+the illustrative snapshots itself, which is why every test binds the
+fixture directory."
+  (llm-pick-source-register
+   'benchlm
+   :kind 'capability
+   :description "BenchLM capability scores"
+   :loader #'llm-pick-source--fixture-loader
+   :fixture "benchlm-sample.json"
+   :fetcher #'llm-pick-source--benchlm-loader)
+  (llm-pick-source-register
+   'openrouter
+   :kind 'price
+   :description "OpenRouter pricing"
+   :loader #'llm-pick-source--fixture-loader
+   :fixture "openrouter-sample.json"
+   :fetcher #'llm-pick-source--openrouter-loader))
+
 (defun llm-pick-test-run ()
   "Reload the modules and run the whole llm-pick test suite."
   (interactive)
   (let ((dir default-directory))
     (llm-pick-test--reload)
+    ;; The built-in sources read their service only, so the suite registers
+    ;; the snapshot-backed ones before anything runs.
+    (llm-pick-test--register-sources)
     ;; The suite must not open a socket.  Every test that collects binds
     ;; `llm-pick-source-offline' itself and this binding is the net under the test
     ;; that forgets: a run that reaches a service is slow, is not

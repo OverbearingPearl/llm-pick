@@ -39,9 +39,10 @@
 ;;
 ;; By default a source reads its service over the network and caches the
 ;; answer in `llm-pick-cache-dir'; with `llm-pick-source-offline' non-nil it
-;; reads its snapshot instead.  The snapshots in test/fixtures are
-;; illustrative samples, not real quotes, which is why the test suite
-;; binds `llm-pick-source-offline' to t and never opens a socket.
+;; reads the snapshot its descriptor names instead, in the JSON layout
+;; that `llm-pick-source--fixture-loader' reads.  The built-in sources
+;; carry a :fetcher only, so offline collecting needs a snapshot
+;; registered for the name.
 
 ;;; Code:
 
@@ -83,9 +84,15 @@ Return NAME."
   (mapcar #'car llm-pick-source-sources))
 
 (defun llm-pick-source--fixture (name)
-  "Return the absolute name of the snapshot that backs source NAME."
+  "Return the absolute path of the snapshot that backs source NAME.
+If NAME names a snapshot with :fixture, `llm-pick-source-fixture-directory'
+must be set; otherwise signal `llm-pick-error'."
   (let ((fixture (plist-get (llm-pick-source--descriptor name) :fixture)))
     (when fixture
+      (unless llm-pick-source-fixture-directory
+        (signal 'llm-pick-error
+                (list (format "Source %s names snapshot file %s but `llm-pick-source-fixture-directory' is nil"
+                              name fixture))))
       (expand-file-name fixture llm-pick-source-fixture-directory))))
 
 ;;; Snapshot loading
@@ -297,16 +304,12 @@ category does not change the answer."
 (llm-pick-source-register 'benchlm
                           :kind 'capability
                           :description "Capability scores per category"
-                          :loader #'llm-pick-source--fixture-loader
-                          :fetcher #'llm-pick-source--benchlm-loader
-                          :fixture "benchlm-sample.json")
+                          :fetcher #'llm-pick-source--benchlm-loader)
 
 (llm-pick-source-register 'openrouter
                           :kind 'price
                           :description "List prices in USD per million tokens"
-                          :loader #'llm-pick-source--fixture-loader
-                          :fetcher #'llm-pick-source--openrouter-loader
-                          :fixture "openrouter-sample.json")
+                          :fetcher #'llm-pick-source--openrouter-loader)
 
 ;;; Collection
 
@@ -333,8 +336,11 @@ model without a score."
   "Return the loader function for the data of source NAME.
 A nil `llm-pick-source-offline' prefers the :fetcher of DESCRIPTOR, which reads
 the service; otherwise, and for a source without one, the :loader reads
-the offline snapshot.  Signal `llm-pick-error' when the preferred one is
-missing, instead of reporting a source with no models."
+the offline snapshot.  The built-in sources carry a :fetcher only, so offline
+collection needs a snapshot registered for the name.  Signal `llm-pick-error'
+when the preferred loader is missing, naming the source and what is missing --
+an offline snapshot for the name when `llm-pick-source-offline' is non-nil, a
+:fetcher otherwise -- and point at `llm-pick-source-register'."
   (let ((loader (if llm-pick-source-offline
                     (plist-get descriptor :loader)
                   (or (plist-get descriptor :fetcher)
@@ -342,7 +348,9 @@ missing, instead of reporting a source with no models."
     (unless loader
       (signal 'llm-pick-error
               (list (format "Source %S has no %s; see `llm-pick-source-register'"
-                            name (if llm-pick-source-offline ":loader" ":fetcher")))))
+                            name (if llm-pick-source-offline
+                                     "offline snapshot"
+                                   ":fetcher")))))
     loader))
 
 (defun llm-pick-source--collect-source (name options)
@@ -350,11 +358,13 @@ missing, instead of reporting a source with no models."
   (let ((descriptor (llm-pick-source--descriptor name)))
     (unless descriptor
       (signal 'llm-pick-error (list (format "Unknown source: %S" name))))
-    (funcall (llm-pick-source--loader name descriptor)
-             (append (list :source name
-                           :kind (plist-get descriptor :kind)
-                           :fixture (llm-pick-source--fixture name))
-                     options))))
+    (let ((loader (llm-pick-source--loader name descriptor)))
+      (funcall loader
+               (append (list :source name
+                             :kind (plist-get descriptor :kind))
+                       (when (eq loader (plist-get descriptor :loader))
+                         (list :fixture (llm-pick-source--fixture name)))
+                       options)))))
 
 (defun llm-pick-source--collect-anchor (names anchor)
   "Return the source whose IDs define the canonical IDs.
