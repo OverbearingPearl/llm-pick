@@ -515,9 +515,9 @@ ARGS is the plist the report was called with; its category,
   "Major mode of the `llm-pick-report' buffer."
   (setq-local truncate-lines nil))
 
-(defun llm-pick--report-display (text)
-  "Show TEXT in the `*llm-pick*' buffer and return TEXT."
-  (let ((buffer (get-buffer-create "*llm-pick*")))
+(defun llm-pick--report-display (text &optional buffer-name)
+  "Show TEXT in the BUFFER-NAME, `*llm-pick*' by default, and return TEXT."
+  (let ((buffer (get-buffer-create (or buffer-name "*llm-pick*"))))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -641,7 +641,8 @@ argument interactively, also lists the IDs that normalize to the anchor's
 model already, which is where a normalization rule that drops too much
 would show."
   (interactive "P")
-  (llm-pick--report-display (llm-pick-align-report-text all)))
+  (llm-pick--report-display (llm-pick-align-report-text all)
+                            "*llm-pick-align*"))
 
 ;;;###autoload
 (defun llm-pick-align-check (&rest args)
