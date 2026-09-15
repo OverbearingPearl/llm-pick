@@ -82,13 +82,26 @@ ARGS is a plist of fields merged into the record, for instance
 
 (defun llm-pick-core--field (m field)
   "Return the value of FIELD in the model record M.
-FIELD is the symbol `name', `provider', `scope', `score', `or-in',
-`or-out', `bm-in', `bm-out', `gap' or `value', or a list of the form
-\(score SOURCE), \(score SOURCE CATEGORY) or \(price SOURCE DIRECTION).
+FIELD is the symbol `name', `provider', `vendor', `family', `scope',
+`score', `or-in', `or-out', `bm-in', `bm-out', `gap' or `value', or a
+list of the form \(score SOURCE), \(score SOURCE CATEGORY) or
+\(price SOURCE DIRECTION).
+`vendor' and `family' are read off the canonical ID rather than stored,
+and neither is ever guessed: `vendor' is the company the lookup table
+knows, and `family' is the first word of the model name, answered only
+for a model whose vendor is known, so an ID no vendor claims answers nil
+for both instead of inventing a maker for it, while
+\(vendor = \"anthropic\") selects every Anthropic model and
+\(family = \"deepseek\") every DeepSeek release.
 The value is nil when M does not carry the requested information."
   (pcase field
     ('name (plist-get m :canonical))
     ('provider (caar (plist-get m :providers)))
+    ('vendor (llm-pick-core--vendor (plist-get m :canonical)))
+    ('family
+     (let ((id (plist-get m :canonical)))
+       (when (llm-pick-core--vendor id)
+         (car (split-string (downcase id) "-")))))
     ('scope (plist-get m :scope))
     ('score (llm-pick-core--default-score m))
     ('or-in (llm-pick-core--price m llm-pick-core-default-price-source 'in))
@@ -111,6 +124,94 @@ into the name \"nil\" and lose the score of every model."
   (cond ((null category) nil)
         ((symbolp category) (symbol-name category))
         (t category)))
+
+(defun llm-pick-core--slug (text)
+  "Return normalized search key for TEXT.
+This key is compared by `llm-pick-core--slug-match-p'.
+This lets names such as `DeepSeek V3.2', `deepseek-v3.2', and
+`deepseek v3 2' all read as `deepseek-v3-2'."
+  (let ((string (if (null text) "" (format "%s" text))))
+    (setq string (downcase string))
+    (setq string (replace-regexp-in-string "[^a-z0-9]+" "-" string))
+    (replace-regexp-in-string "\\`-+\\|-+\\'" "" string)))
+
+(defun llm-pick-core--slug-match-p (value m)
+  "Return non-nil if VALUE matches model record M."
+  (let ((needle (llm-pick-core--slug value)))
+    (when (not (string-empty-p needle))
+      (cl-some (lambda (candidate)
+                 (when candidate
+                   (string-match-p (regexp-quote needle)
+                                   (llm-pick-core--slug candidate))))
+               (append
+                (list (llm-pick-core--field m 'name)
+                      (plist-get m :display-name))
+                (cl-loop for pair in (plist-get m :providers)
+                         append (list (car pair) (cdr pair))))))))
+
+(defun llm-pick-core--vendor (model)
+  "Return the vendor brand for MODEL, or nil if it cannot be told.
+
+The vendor is the company that makes the model.  The model's family is
+the first hyphen-separated word of its lowercased ID, and the vendor is
+looked up from that family.  The lookup is a table rather than a guess,
+so an unknown name answers nil.  Never guess and never fall back to the
+capitalized first word.  The vendor is deliberately not the same
+concept as `provider' (a channel that serves an ID, see the
+:providers alist of a record) or as a source (a catalogue such as
+benchlm or openrouter)."
+  (let ((table
+         '(("claude" . "Anthropic")
+           ("gpt" . "OpenAI")
+           ("o1" . "OpenAI")
+           ("o3" . "OpenAI")
+           ("o4" . "OpenAI")
+           ("chatgpt" . "OpenAI")
+           ("gemini" . "Google")
+           ("gemma" . "Google")
+           ("palm" . "Google")
+           ("llama" . "Meta")
+           ("llava" . "Meta")
+           ("qwen" . "Alibaba")
+           ("qwq" . "Alibaba")
+           ("grok" . "xAI")
+           ("mistral" . "Mistral")
+           ("mixtral" . "Mistral")
+           ("magistral" . "Mistral")
+           ("pixtral" . "Mistral")
+           ("codestral" . "Mistral")
+           ("devstral" . "Mistral")
+           ("deepseek" . "DeepSeek")
+           ("kimi" . "Moonshot AI")
+           ("moonshot" . "Moonshot AI")
+           ("command" . "Cohere")
+           ("aya" . "Cohere")
+           ("nova" . "Amazon")
+           ("titan" . "Amazon")
+           ("granite" . "IBM")
+           ("phi" . "Microsoft")
+           ("glm" . "Zhipu AI")
+           ("minimax" . "MiniMax")
+           ("ernie" . "Baidu")
+           ("hunyuan" . "Tencent")
+           ("doubao" . "ByteDance")
+           ("seed" . "ByteDance")
+           ("nemotron" . "NVIDIA")
+           ("jamba" . "AI21")
+           ("reka" . "Reka")
+           ("dbrx" . "Databricks")
+           ("olmo" . "Allen AI")
+           ("arctic" . "Snowflake")))
+        (word (car (split-string (downcase model) "-")))
+        (best-word nil)
+        (best-brand nil))
+    (dolist (entry table best-brand)
+      (let ((candidate (car entry)))
+        (when (and (string-prefix-p candidate word)
+                   (or (not best-word)
+                       (> (length candidate) (length best-word))))
+          (setq best-word candidate)
+          (setq best-brand (cdr entry)))))))
 
 (defun llm-pick-core--score (m source category)
   "Return the capability score of M at SOURCE.
@@ -193,7 +294,15 @@ Numbers compare as numbers, everything else as text, so that
 PRED is a list \(OP FIELD ARG) where OP is `>', `<', `>=', `<=', `=',
 `~' (regexp match) or `in' (membership).  A field M does not carry
 never matches, it does not signal.  `=' and `~' read a symbol field
-such as `provider' as its name, so \`(provider = \"google\")' matches."
+such as `provider' as its name, so \`(provider = \"google\")' matches.
+For `~' on `name', the regular expression is tried first.  If it
+matches nothing, it falls back to word-wise slug matching: the regexp
+is split on runs of non-alphanumeric characters, empty words are
+dropped, and every remaining word must satisfy
+`llm-pick-core--slug-match-p' with the model record M.  That predicate
+searches the canonical ID, the display name and the provider IDs, so
+`DeepSeek-3', `deepseek 3' and `deepseek-v3.2' all find the model.  A
+regexp with no word matches nothing."
   (pcase pred
     (`(> ,field ,value) (llm-pick-core--compare m field value #'>))
     (`(< ,field ,value) (llm-pick-core--compare m field value #'<))
@@ -202,9 +311,26 @@ such as `provider' as its name, so \`(provider = \"google\")' matches."
     (`(= ,field ,value) (llm-pick-core--equal-field m field value))
     (`(~ ,field ,regexp)
      (let ((value (llm-pick-core--field m field)))
-       (and value
-            (string-match-p regexp (llm-pick-core--text value))
-            t)))
+       (if (eq field 'name)
+           (or (and value
+                    (string-match-p regexp (llm-pick-core--text value))
+                    t)
+               (let ((words
+                      (delete ""
+                              (mapcar #'llm-pick-core--slug
+                                      (delete ""
+                                              (split-string regexp
+                                                            "[^[:alnum:]]+"
+                                                            t))))))
+                 (and words
+                      (catch 'match
+                        (dolist (word words)
+                          (unless (llm-pick-core--slug-match-p word m)
+                            (throw 'match nil)))
+                        t))))
+         (and value
+              (string-match-p regexp (llm-pick-core--text value))
+              t))))
     (`(in ,field ,values)
      (and (member (llm-pick-core--field m field) values) t))
     (_ (error "Unknown predicate: %S" pred))))

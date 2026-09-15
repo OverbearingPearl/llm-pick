@@ -172,6 +172,33 @@
     (ert-info ("A nil WHERE keeps every model")
       (should (equal (llm-pick-core--filter models nil) models)))))
 
+(ert-deftest llm-pick-core-test-name-match-forgives-spelling ()
+  (let ((m (llm-pick-core--make-record "deepseek-v3.2"
+                                       :display-name "DeepSeek V3.2")))
+    (ert-info ("A name with a space and different case still matches")
+      (should (llm-pick-core--match-p m '(~ name "DeepSeek 3")))
+      (should (llm-pick-core--match-p m '(~ name "deepseek 3"))))
+    (ert-info ("A regexp matching the canonical ID keeps working")
+      (should (llm-pick-core--match-p m '(~ name "deepseek-v3")))
+      (should-not (llm-pick-core--match-p m '(~ name "\\`gpt"))))
+    (ert-info ("A regexp with no alphanumeric word matches nothing")
+      (should-not (llm-pick-core--match-p m '(~ name "  "))))))
+
+(ert-deftest llm-pick-core-test-vendor-and-family ()
+  (ert-info ("Vendor is derived from the canonical ID")
+    (should (equal (llm-pick-core--field (llm-pick-core--make-record "claude-3-5-sonnet") 'vendor)
+                   "Anthropic"))
+    (should (equal (llm-pick-core--field (llm-pick-core--make-record "deepseek-v3.2") 'vendor)
+                   "DeepSeek")))
+  (ert-info ("Family is derived from the canonical ID")
+    (should (equal (llm-pick-core--field (llm-pick-core--make-record "claude-3-5-sonnet") 'family)
+                   "claude"))
+    (should (equal (llm-pick-core--field (llm-pick-core--make-record "deepseek-v3.2") 'family)
+                   "deepseek")))
+  (ert-info ("Unknown IDs have no vendor or family")
+    (should-not (llm-pick-core--field (llm-pick-core--make-record "mystery-1") 'vendor))
+    (should-not (llm-pick-core--field (llm-pick-core--make-record "mystery-1") 'family))))
+
 (provide 'llm-pick-core-test)
 
 ;;; llm-pick-core-test.el ends here

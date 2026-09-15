@@ -176,6 +176,16 @@ Prices are in USD per million tokens.  The last entry is nil, the open
 ended bucket that holds everything above the bound before it."
   :type '(repeat (choice number (const :tag "Open ended" nil))))
 
+(defcustom llm-pick-report-benchmark-bands '(0.5 0.8 1.25 2.0 nil)
+  "Output price ratio bands for the benchmark report.
+
+Each number is an output price ratio against the baseline model: 0.5
+means half the baseline's output price, and 2.0 means twice as much.
+The last entry nil is an open-ended band holding everything above the
+band before it.  See `llm-pick-report-benchmark'."
+  :type '(repeat (choice number (const nil)))
+  :group 'llm-pick)
+
 (defcustom llm-pick-align-match-threshold 0.85
   "Minimum similarity for two IDs to count as the same model."
   :type 'number)
@@ -437,6 +447,37 @@ tokens, strongest first."
   (interactive)
   (llm-pick-report :target-score 75 :budget 5.0 :order 'score :descending t))
 
+;;;###autoload
+(defun llm-pick-report-benchmark (baseline &rest args)
+  "Show the models around BASELINE, bucketed by output price ratio.
+BASELINE is matched loosely: its case, its hyphens and its spaces do
+not matter, and the canonical ID, the display name and the provider
+IDs are all searched, so `DeepSeek 3', `deepseek-v3' and
+`deepseek-v3.2' all find the model.
+
+The bands are output price ratios around the baseline's own output
+price, not absolute prices, so the report stays useful when the
+baseline moves.  ARGS is a plist for `llm-pick-collect', such as
+:category, :sources and :anchor; the bands come from
+`llm-pick-report-benchmark-bands'."
+  (interactive (list (read-string "Baseline model (e.g. deepseek-v3): ")))
+  (let* ((records (apply #'llm-pick-collect args))
+         (matches (llm-pick-core--filter
+                   records (list (list '~ 'name baseline))))
+         (baseline-record (or (cl-find baseline matches
+                                       :key (lambda (record)
+                                              (llm-pick-core--field record 'name))
+                                       :test #'equal)
+                              (car matches))))
+    (unless baseline-record
+      (signal 'llm-pick-error
+              (list (format "No model matches %S" baseline))))
+    (let ((text (llm-pick-render-report-benchmark
+                 records baseline-record
+                 llm-pick-report-benchmark-bands)))
+      (llm-pick--report-display text "*llm-pick*")
+      text)))
+
 (defun llm-pick-align-report-text (&optional all)
   "Return the text of the report of the last alignment.
 ALL is passed on to `llm-pick-render-report-alignment'."
@@ -557,6 +598,7 @@ accepts the default: `r' then RET shows every model."
     ("q" "Report with a query" llm-pick-report-query)
     ("f" "Pareto frontier" llm-pick-report-frontier)
     ("l" "Price ladder" llm-pick-report-ladder)
+    ("b" "Benchmark against a model" llm-pick-report-benchmark)
     ("t" "Best value" llm-pick-top-value)
     ("c" "Cheap and strong" llm-pick-cheap-strong)]
    ["Choose"

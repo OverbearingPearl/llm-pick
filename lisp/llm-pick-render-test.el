@@ -270,6 +270,34 @@ KIND is the alignment kind; SCORE and BEST are optional similarity scores."
   (ert-info ("A run without a problem says so instead of showing nothing")
     (should (string-match-p "No problem" (llm-pick-render-report-problems nil)))))
 
+(ert-deftest llm-pick-render-test-benchmark-groups-by-output-price-ratio ()
+  (let* ((llm-pick-core-default-capability-source 'benchlm)
+         (llm-pick-core-default-price-source 'openrouter)
+         (base (llm-pick-core--make-record
+                "base"
+                :scores '((benchlm . 80))
+                :prices '((openrouter :out 1.0))))
+         (near (llm-pick-core--make-record
+                "near"
+                :scores '((benchlm . 85))
+                :prices '((openrouter :out 1.2))))
+         (dear (llm-pick-core--make-record
+                "dear"
+                :scores '((benchlm . 90))
+                :prices '((openrouter :out 4.0))))
+         (report (llm-pick-render-report-benchmark
+                  (list base near dear)
+                  base
+                  '(0.5 2.0 nil))))
+    (ert-info ("Headline names the baseline")
+      (should (string-match-p "base" report)))
+    (ert-info ("The near band title appears")
+      (should (string-match-p "0\\.50x to 2\\.00x" report)))
+    (ert-info ("The dear band title appears")
+      (should (string-match-p "2\\.00x or more" report)))
+    (ert-info ("The dear model's delta reads +10.0")
+      (should (string-match-p "\\+10\\.0" report)))))
+
 (provide 'llm-pick-render-test)
 
 ;;; llm-pick-render-test.el ends here

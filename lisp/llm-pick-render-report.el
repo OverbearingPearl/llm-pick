@@ -41,6 +41,8 @@
 (defconst llm-pick-render-report--headers
   '((name . "Model")
     (provider . "Provider")
+    (vendor . "Vendor")
+    (family . "Family")
     (scope . "Scope")
     (score . "Score")
     (bar . "Capability")
@@ -278,6 +280,82 @@ nil).  Every non-empty bucket shows its most capable model."
                        (llm-pick-render-report--cell model 'score maximum)
                        (llm-pick-render-report--cell model 'or-out maximum))))
              buckets))))
+
+(defun llm-pick-render-report-benchmark (models baseline bounds &optional categories)
+  "Render a benchmark report comparing MODELS against BASELINE in price BANDS.
+BOUNDS is an increasing list of price ratios against BASELINE, the last one nil
+for the open ended band.  CATEGORIES names the capability columns to compare;
+nil means read the distinct :categories of MODELS, and when that yields nothing
+fall back to a single default-score column."
+  (let* ((categories (or categories
+                         (delete-dups
+                          (mapcan (lambda (m)
+                                    (copy-sequence (plist-get m :categories)))
+                                  models))
+                         '(nil)))
+         (capability-source (symbol-value 'llm-pick-core-default-capability-source))
+         (baseline-name (llm-pick-core--field baseline 'name))
+         (baseline-vendor (or (llm-pick-core--field baseline 'vendor)
+                              "unknown vendor"))
+         (baseline-price (llm-pick-core--field baseline 'or-out))
+         (baseline-price-str
+          (if (null baseline-price)
+              (format "%s (no output price)" llm-pick-render-report--missing)
+            (format "$%s/M out" (llm-pick-render-report--number baseline-price))))
+         (maximum (cl-loop for m in models
+                           maximize (or (llm-pick-core--field m 'or-out) 0)))
+         (headline (format "Baseline: %s (%s), %s\n\n"
+                           baseline-name baseline-vendor baseline-price-str))
+         (bands (llm-pick-analyze--benchmark-bands models baseline bounds))
+         (header (append '("Model" "$/M out" "vs base")
+                         (mapcar (lambda (cat)
+                                   (if cat
+                                       (format "Delta %s" cat)
+                                     "Delta"))
+                                 categories)))
+         (align (number-sequence 1 (+ 2 (length categories))))
+         (sections
+          (cl-loop for (range . band) in bands
+                   when band
+                   collect
+                   (let* ((low (car range))
+                          (high (cdr range))
+                          (title
+                           (cond ((and (null low) (null high)) "any price")
+                                 ((null low) (format "< %.2fx" high))
+                                 ((null high) (format "%.2fx or more" low))
+                                 (t (format "%.2fx to %.2fx" low high))))
+                          (rows
+                           (cl-loop for model in band
+                                    collect
+                                    (let* ((model-name (llm-pick-core--field model 'name))
+                                           (price-cell (llm-pick-render-report--cell
+                                                        model 'or-out maximum))
+                                           (ratio (llm-pick-analyze--benchmark-ratio
+                                                   model baseline))
+                                           (ratio-str (if ratio
+                                                          (format "%.2fx" ratio)
+                                                        llm-pick-render-report--missing))
+                                           (delta-cells
+                                            (cl-loop for cat in categories
+                                                     for delta = (llm-pick-analyze--benchmark-delta
+                                                                  model baseline capability-source cat)
+                                                     collect (if (null delta)
+                                                                 llm-pick-render-report--missing
+                                                               (format "%+.1f" delta)))))
+                                      (cons model-name
+                                            (cons price-cell
+                                                  (cons ratio-str delta-cells)))))))
+                     (llm-pick-render-report--section
+                      (format "%s (%s)" title
+                              (llm-pick-render-report--count (length band) "model"))
+                      ""
+                      header
+                      rows
+                      align)))))
+    (if sections
+        (concat headline (mapconcat #'identity sections "\n\n"))
+      (concat headline "No other model falls in any price band.\n"))))
 
 (defun llm-pick-render-report--count (number noun)
   "Return NUMBER and NOUN, pluralized."

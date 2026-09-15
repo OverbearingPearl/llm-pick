@@ -20,6 +20,68 @@ canonical ID, and hands you the records — or the one model — to act on.
 
 `M-x llm-pick-menu` puts every command behind one transient menu.
 
+## Usage
+
+A *source* is a catalogue of model data: `benchlm` for capability, `openrouter` for price, and the two are peers. A *provider* is a channel you can call: `anthropic`, `openai`, `google`, `openrouter` are peers, and `openrouter` is both a source and a provider. A *vendor* is the company that makes the model: Anthropic, OpenAI, DeepSeek. A *family* is the name root of a model line: `claude`, `deepseek`, `gpt`. A *model* is one canonical ID such as `claude-3-5-sonnet`. Price always means the output price in USD per million tokens, because that is the axis the frontier, the ladder and the benchmark bands share; the input price is only ever a column you add (`columns name,or-in,or-out,score`).
+
+Every recipe is `M-x llm-pick-report-query`, or any report command with a prefix argument (`C-u`), followed by one line. TAB completes the words and the values, and an empty line shows every model.
+
+### One model I half remember
+
+```text
+where name~deepseek-3
+```
+
+`name~` first tries the text as a regexp. When that matches nothing, it splits the text into words and matches them loosely, so case, hyphens, underscores, dots and spaces do not matter. It searches the canonical ID, the display name and the provider IDs. Thus `deepseek 3`, `DeepSeek-3` and `deepseek-v3.2` all find `deepseek-v3-2`.
+
+### A series
+
+```text
+where family=deepseek
+where name~claude-3-5
+```
+
+`family` is the name root of the canonical ID.
+
+### A vendor
+
+```text
+where vendor=Anthropic
+```
+
+The vendor table knows brands such as Anthropic, OpenAI, Google, DeepSeek, Meta, Mistral, Cohere, xAI, Alibaba, Amazon, Microsoft, Nvidia, Perplexity, and AI21. `=` compares text, so the brand must be spelled as the table spells it; `vendor~` takes a regexp.
+
+### Everything one catalogue lists
+
+```text
+sources benchlm
+sources openrouter
+```
+
+`sources` selects the catalogues to collect from: `benchlm` for capability data, `openrouter` for price data. That is not the same as `on` (or `provider`), which selects the channels a model must be callable on.
+
+### What the neighbourhood of one model is worth
+
+```text
+M-x llm-pick-report-benchmark
+```
+
+It asks for a baseline matched as loosely as `name~`. It then shows the other models in bands of output price ratio to the baseline's own output price, each band with one `Delta CATEGORY` column, so a model a little dearer but much stronger is visible instead of lost beyond a fixed budget.
+
+```elisp
+(setq llm-pick-report-benchmark-bands '(0.5 0.8 1.25 2.0 nil))
+(llm-pick-report-benchmark "deepseek-v3" :category "coding")
+```
+
+### I already picked one, what else is there
+
+```elisp
+(let ((model (llm-pick-pick)))
+  (llm-pick-report-benchmark model))
+```
+
+`llm-pick-pick` returns a canonical ID. `M-x llm-pick-pick-interactive` asks for the same query interactively and echoes the ID.
+
 ## Status
 
 Version 0.2.0 implements the data path, the reports and the choice.
@@ -46,6 +108,7 @@ The commands:
 | `M-x llm-pick-report-query` | the same, asking for the query first |
 | `M-x llm-pick-report-frontier` | the Pareto frontier with the gain of every step up |
 | `M-x llm-pick-report-ladder` | the models bucketed by output price |
+| `M-x llm-pick-report-benchmark` | one model's neighbourhood, in bands of output price ratio |
 | `M-x llm-pick-top-value` | the best models by capability per dollar |
 | `M-x llm-pick-cheap-strong` | models scoring above 75 for less than $5/M out |
 | `M-x llm-pick-pick-interactive` | the best model the criteria you type allow |
@@ -399,6 +462,31 @@ It shows ID problems instead of signaling them; a source that cannot be read
 at all still signals `llm-pick-error`.  Every align error ends with a pointer
 to this command, so the way to see them all is one keystroke from the failure.
 
+### Benchmark against one model
+
+`M-x llm-pick-report-benchmark` asks for a baseline model and then answers the question a fixed budget cannot — what the other models are worth relative to the one you already run. Bands are output price ratios against the baseline's own output price, not absolute prices, so no boundary has to be chosen in advance and a model just past a fixed limit is not lost.
+
+The baseline is matched loosely: its case, its hyphens and its spaces do not matter, and the canonical ID, the display name and the provider IDs are all searched, so `DeepSeek 3`, `deepseek-3`, `deepseek-v3` and `deepseek-v3.2` all find the model. The first match wins; when nothing matches, `llm-pick-error` is signalled.
+
+Each band lists the models that fall in it, sorted by how far their price is from the baseline; every row carries the model, its `$/M out`, its price as a multiple of the baseline (`2.00x` for twice the price, `0.50x` for half) and one `Delta` column per capability category the collection carries, in capability points above the baseline, where a negative number is a model that is weaker.
+
+The bands are the ratios in the user option `llm-pick-report-benchmark-bands`; the first band is open below and the last is open above, so nothing sits outside them. The `:category`, `:sources` and `:anchor` arguments work exactly as they do for `llm-pick-report`, so the baseline and its neighbourhood can be collected from one category, from several, or from a chosen set of sources.
+
+For example, `(llm-pick-report-benchmark :anchor "deepseek-v3")` gives:
+
+```text
+Benchmark against deepseek-v3 (DeepSeek, $0.28/M out)
+< 0.8x
+  qwen3-235b          $0.18/M out   0.64x   Coding -0.8   Reasoning -1.2
+  deepseek-v3.1       $0.14/M out   0.50x   Coding +2.1   Reasoning +1.4
+0.8x - 1.2x
+  deepseek-v3         $0.28/M out   1.00x   Coding  0.0   Reasoning  0.0  <-- baseline
+  glm-4.5             $0.30/M out   1.07x   Coding +0.9   Reasoning +0.6
+> 1.2x
+  claude-sonnet-4     $3.00/M out  10.71x   Coding +6.3   Reasoning +5.1
+  gpt-5               $10.00/M out 35.71x   Coding +8.0   Reasoning +7.4
+```
+
 ## Sources
 
 A source is a named provider of model data.  Two are registered by default:
@@ -593,6 +681,7 @@ own.  Set `llm-pick-align-match-consensus-band` to `0` to turn the rule off.
 | `llm-pick-render-default-bar-width` | `30` | width of the capability bar in a report |
 | `llm-pick-report-columns` | `(name bar score or-out)` | columns of a `table` report |
 | `llm-pick-report-ladder-bounds` | `(0.5 1 2 5 nil)` | price buckets of a `ladder` report |
+| `llm-pick-report-benchmark-bands` | `(0.5 0.8 1.25 2.0 nil)` | output price ratios of a `benchmark` report, against the baseline's own output price |
 
 `llm-pick-similarity-fns` is a plain variable rather than a defcustom.  Every
 option carries a docstring; `C-h v` prints it.

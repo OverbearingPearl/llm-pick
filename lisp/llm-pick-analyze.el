@@ -151,6 +151,77 @@ non-empty bucket, in the order of BOUNDS."
              when (car bucket)
              collect (cons bound (car bucket)))))
 
+;;; Benchmarking against one model
+
+(defun llm-pick-analyze--benchmark-ratio (model baseline)
+  "Return MODEL's output price as a multiple of BASELINE's.
+Return nil when either model lacks an OR-OUT price or when
+BASELINE costs nothing."
+  (let ((price (llm-pick-core--field model 'or-out))
+        (base (llm-pick-core--field baseline 'or-out)))
+    (when (and price base (not (zerop base)))
+      (/ price base))))
+
+(defun llm-pick-analyze--benchmark-distance (model baseline)
+  "Return how far MODEL's price ratio from BASELINE is from one.
+A result of zero means the same price, and one means MODEL costs
+twice as much or half as much as BASELINE."
+  (let ((ratio (llm-pick-analyze--benchmark-ratio model baseline)))
+    (when ratio
+      (abs (- ratio 1)))))
+
+(defun llm-pick-analyze--benchmark-range (index bounds)
+  "Return the price-ratio range of the band at INDEX in BOUNDS.
+LOW is nil for the open bottom band and HIGH is nil for the open
+ended band, so a renderer can name a band without knowing whether
+it is the first or the last one."
+  (cons (when (> index 0)
+          (nth (1- index) bounds))
+        (nth index bounds)))
+
+(defun llm-pick-analyze--benchmark-bands (models baseline bounds)
+  "Return MODELS bucketed into price bands around BASELINE using BOUNDS.
+Each element is (RANGE . MODEL-LIST) for a non-empty band, in the
+order of BOUNDS.  Models are sorted by distance from BASELINE, and
+BASELINE itself and models without a price are omitted."
+  (let ((buckets (mapcar (lambda (_) nil) bounds)))
+    (dolist (model models)
+      (unless (equal model baseline)
+        (let ((ratio (llm-pick-analyze--benchmark-ratio model baseline)))
+          (when (numberp ratio)
+            (let* ((index (llm-pick-analyze--bucket-index ratio bounds))
+                   (cell (nthcdr index buckets)))
+              (setcar cell (cons model (car cell))))))))
+    (let (result)
+      (dotimes (index (length bounds))
+        (let* ((bucket (nth index buckets))
+               (sorted (sort bucket
+                             (lambda (a b)
+                               (< (abs (- (llm-pick-analyze--benchmark-ratio
+                                           a baseline)
+                                          1))
+                                  (abs (- (llm-pick-analyze--benchmark-ratio
+                                           b baseline)
+                                          1)))))))
+          (when sorted
+            (push (cons (llm-pick-analyze--benchmark-range index bounds)
+                        sorted)
+                  result))))
+      (nreverse result))))
+
+(defun llm-pick-analyze--benchmark-delta (model baseline source category)
+  "Return MODEL's capability points above BASELINE for SOURCE and CATEGORY.
+When CATEGORY is nil, read the default score column instead.  A
+negative result means MODEL is weaker, and nil is returned when
+either model lacks that score."
+  (let* ((column (if category
+                     (list 'score source category)
+                   'score))
+         (score (llm-pick-core--field model column))
+         (base (llm-pick-core--field baseline column)))
+    (when (and score base)
+      (- score base))))
+
 (provide 'llm-pick-analyze)
 
 ;;; llm-pick-analyze.el ends here

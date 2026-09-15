@@ -62,12 +62,13 @@ Callers may narrow it with a `let' binding.")
 value can be recalled instead of retyped.")
 
 (defconst llm-pick-query-read-fields
-  '("name" "provider" "scope" "score" "or-in" "or-out"
-    "bm-in" "bm-out" "gap" "value")
+  '("name" "vendor" "family" "provider" "scope" "score" "or-in" "or-out"
+    "bm-in" "bm-out" "gap" "value" "vendor" "family")
   "Fields a query can order by or show as a column.
 It has to stay in step with the fields `llm-pick-core--field' accepts: a name
 here that it does not know would offer a column the report then refuses
-to render.")
+to render.  `vendor' and `family' are read off the canonical ID rather than
+stored.")
 
 (defun llm-pick-query-read-key (word)
   "Return the argument key of the query WORD, or nil."
@@ -90,7 +91,7 @@ when it is not suggested.  Numeric words like :budget and
     (:sources (llm-pick-source--names))
     (:anchor (llm-pick-source--names))
     (:where '("score>80" "or-out<5" "value>10" "provider=openrouter"
-              "name~claude"))
+              "name~claude" "vendor=anthropic" "family=deepseek"))
     (:scope '("both" "capability-only" "price-only"))
     (:available-on (llm-pick-source--names))
     (:order llm-pick-query-read-fields)
