@@ -390,22 +390,6 @@ line takes and `llm-pick-query-read-last-query' for the default it offers."
       (llm-pick--report-display text))))
 
 ;;;###autoload
-(defun llm-pick-top-value (&optional top)
-  "Show the TOP models by capability per dollar.
-TOP defaults to 10."
-  (interactive "P")
-  (llm-pick-report :order 'value :descending t
-                   :top (if top (prefix-numeric-value top) 10)
-                   :columns '(name bar score or-out value)))
-
-;;;###autoload
-(defun llm-pick-cheap-strong ()
-  "Show the capable and cheap models: score above 75, output price below 5."
-  (interactive)
-  (llm-pick-report :where '((> score 75) (< or-out 5))
-                   :order 'score :descending t))
-
-;;;###autoload
 (defun llm-pick-report-frontier (&rest args)
   "Show the Pareto frontier and the gain of every step up in price.
 A prefix argument reads a one line query first, see
@@ -428,6 +412,15 @@ ARGS is a plist for `llm-pick-report'."
   (apply #'llm-pick-report :mode 'ladder args))
 
 ;;;###autoload
+(defun llm-pick-top-value ()
+  "Show the ten models with the most capability per dollar.
+A `table' report over every model, ordered by the `value' field, the
+capability score divided by the output price, so the models that give
+the most capability for the money come first."
+  (interactive)
+  (llm-pick-report :order 'value :descending t :top 10))
+
+;;;###autoload
 (defun llm-pick-report-query ()
   "Ask for a one line query and show the report of what it selected.
 This is what a report command becomes with a prefix argument; it exists
@@ -435,6 +428,14 @@ so that the menu can offer the query without one."
   (interactive)
   (apply #'llm-pick-report
          (llm-pick-query-read-args llm-pick--report-query-prompt)))
+
+;;;###autoload
+(defun llm-pick-cheap-strong ()
+  "Show the capable models that cost little.
+Every model scoring at least 75 for less than $5 per million output
+tokens, strongest first."
+  (interactive)
+  (llm-pick-report :target-score 75 :budget 5.0 :order 'score :descending t))
 
 (defun llm-pick-align-report-text (&optional all)
   "Return the text of the report of the last alignment.
@@ -509,7 +510,6 @@ The most capable candidate wins and the cheaper one wins a tie.  The
 result is guaranteed to carry an ID for a provider in `:available-on',
 so `llm-pick-resolve' can always turn it into a callable ID.  Signal
 `llm-pick-error' when no model satisfies the criteria."
-  (interactive)
   (llm-pick-core--field (llm-pick--pick-record args) 'name))
 
 ;;;###autoload
