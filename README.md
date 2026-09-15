@@ -529,12 +529,12 @@ answers is what model this is, not who sells it.
 When normalization is not enough, the remaining candidates are scored with the
 functions in `llm-pick-similarity-fns`, in order, first non-nil result wins:
 
-- `llm-pick-align--similarity-equal`: 1.0 for equal IDs
-- `llm-pick-align--similarity-prefix`: up to 0.95 when one ID is a prefix of the other
-- `llm-pick-align--similarity-substring`: up to 0.90 when one ID contains the other
-- `llm-pick-align--similarity-token`: up to 0.95, the Jaccard score of the tokens,
+- `llm-pick-align-similarity-equal`: 1.0 for equal IDs
+- `llm-pick-align-similarity-prefix`: up to 0.95 when one ID is a prefix of the other
+- `llm-pick-align-similarity-substring`: up to 0.90 when one ID contains the other
+- `llm-pick-align-similarity-token`: up to 0.95, the Jaccard score of the tokens,
   or nil when the two share no token at all
-- `llm-pick-align--similarity-edit-distance`: the normalized edit distance
+- `llm-pick-align-similarity-edit-distance`: the normalized edit distance
 
 A prefix or a substring match is scaled by the part of the longer ID it covers,
 so two IDs are only as close as the text they actually share: `gpt-5` shares

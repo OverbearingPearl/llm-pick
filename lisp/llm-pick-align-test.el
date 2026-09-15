@@ -148,9 +148,9 @@
         (llm-pick-align-match-ambiguity-gap 0.05)
         (llm-pick-align-on-unmatched 'standalone))
     (ert-info ("A prefix match is only as strong as the part it covers")
-      (should (< (llm-pick-align--similarity "claude-opus-4" "claude-opus-4-8")
+      (should (< (llm-pick-align-similarity-score "claude-opus-4" "claude-opus-4-8")
                  0.85))
-      (should (< (llm-pick-align--similarity "gpt-5" "gpt-5-6-sol") 0.5)))
+      (should (< (llm-pick-align-similarity-score "gpt-5" "gpt-5-6-sol") 0.5)))
     (ert-info ("So a generic name leaves every versioned sibling unmatched")
       (let ((report (llm-pick-align--align
                      '((benchlm . ("Claude Opus 4 8" "Claude Opus 4 7"))
@@ -271,7 +271,7 @@
 (ert-deftest llm-pick-align-test-a-collecting-run-reports-every-problem ()
   ;; Only unmistakable misses are used here.  An ID such as `x/foo-bar'
   ;; is a substring of `foo-bar' yet covers 7 of its 8 characters, and
-  ;; `llm-pick-align--similarity-substring' scales by that coverage, so it
+  ;; `llm-pick-align-similarity-substring' scales by that coverage, so it
   ;; reaches only 0.90 * 7/8 = 0.7875, below the threshold, and is an
   ;; unmatched ID too.  That is the intended reading of a near miss, but
   ;; it would make this test report three problems instead of the two it
@@ -435,14 +435,14 @@
   ;; scored the same against the input, so the `best match' column of a
   ;; live report showed a flat 0.000 next to a name that was arbitrary.
   (ert-info ("A pair without a shared token falls through to the edit distance")
-    (should-not (llm-pick-align--similarity-token "sakana-namazu" "claude-fable-5-1"))
-    (should (> (llm-pick-align--similarity "sakana-namazu" "claude-fable-5-1") 0.0)))
+    (should-not (llm-pick-align-similarity-token "sakana-namazu" "claude-fable-5-1"))
+    (should (> (llm-pick-align-similarity-score "sakana-namazu" "claude-fable-5-1") 0.0)))
   (ert-info ("A pair that does share a token is still the token rule's answer")
     ;; Two tokens shared out of four, which is where the 0.475 the live
     ;; report prints for `claude-3-haiku' against `claude-3-opus' comes
     ;; from: those two really are as close as their shared tokens say,
     ;; and both are under the threshold, which is the point.
-    (should (< 0.4 (llm-pick-align--similarity-token "claude-3-haiku" "claude-3-opus")
+    (should (< 0.4 (llm-pick-align-similarity-token "claude-3-haiku" "claude-3-opus")
                0.5))))
 
 (ert-deftest llm-pick-align-test-reordered-tokens-align-by-similarity ()
@@ -450,7 +450,7 @@
         (llm-pick-align-match-threshold 0.85)
         (llm-pick-align-match-ambiguity-gap 0.05))
     (ert-info ("`gemini-pro-1.5' and `gemini-1.5-pro' differ only in token order")
-      (should (>= (llm-pick-align--similarity (llm-pick-align--normalize "gemini-1.5-pro")
+      (should (>= (llm-pick-align-similarity-score (llm-pick-align--normalize "gemini-1.5-pro")
                                         (llm-pick-align--normalize "google/gemini-pro-1.5"))
                   llm-pick-align-match-threshold)))
     (ert-info ("The alignment merges such a pair onto one canonical ID")
