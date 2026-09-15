@@ -229,6 +229,23 @@ KIND is the alignment kind; SCORE and BEST are optional similarity scores."
         (should (string-match-p "vendor/two-2024" text))
         (should (string-match-p "vendor/four" text))))))
 
+(ert-deftest llm-pick-render-test-alignment-can-list-every-unmatched-id ()
+  ;; With ALL non-nil even entries far below the near-miss band are
+  ;; listed, so nothing silently disappears from the report.
+  (let ((entry (list :kind 'unmatched
+                     :id "vendor/far"
+                     :norm "vendor far far"
+                     :best "vendor/somewhere-else"
+                     :score 0.3)))
+    (let ((report (list :entries (list entry)
+                        :mapping (list (cons (cons "openrouter" "vendor/far") "vendor/far")))))
+      (ert-info ("With ALL t the far-below-band entry is listed")
+        (let ((text (llm-pick-render-report-alignment report t)))
+          (should (string-match-p "vendor far far" text))))
+      (ert-info ("With ALL nil it stays hidden, as today")
+        (let ((text (llm-pick-render-report-alignment report nil)))
+          (should-not (string-match-p "vendor far far" text)))))))
+
 (ert-deftest llm-pick-render-test-alignment-leaves-the-report-alone ()
   (let ((llm-pick-align-match-threshold 0.85)
         (entries (copy-sequence (plist-get llm-pick-render-test--alignment

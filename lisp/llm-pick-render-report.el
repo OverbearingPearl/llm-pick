@@ -453,9 +453,9 @@ An ID that already normalizes to the anchor's model decided nothing and
 is counted, not listed; pass ALL to list those as well, because a rule
 that drops too much shows there and nowhere else.  Of the unmatched IDs
 only those within `llm-pick-render-report--near-miss-band' of
-`llm-pick-align-match-threshold' are listed: they are the ones a rule or a
-threshold could bring in, while the rest are models the anchor does not
-track.  The report the caller passed in is not modified."
+`llm-pick-align-match-threshold' are listed; pass ALL to list every
+unmatched ID as well, including those beyond the band.  The report the
+caller passed in is not modified."
   (let* ((threshold (symbol-value 'llm-pick-align-match-threshold))
          (entries (plist-get report :entries))
          (mapping (plist-get report :mapping))
@@ -519,6 +519,16 @@ track.  The report the caller passed in is not modified."
                  "\n")
       llm-pick-render-report--unmatched-headers
       (llm-pick-render-report--unmatched-rows near) '(4))
+     (when all
+       (llm-pick-render-report--section
+        (format "\n=== Matched no model, full list (%d) ==="
+                (length unmatched))
+        (mapconcat #'identity
+                   (list (format "These are the IDs beyond the near-miss band of %.2f, listed for review of their normalized form because the caller asked for the full list."
+                                 llm-pick-render-report--near-miss-band))
+                   "\n")
+        llm-pick-render-report--unmatched-headers
+        (llm-pick-render-report--unmatched-rows unmatched) '(4)))
      (when all
        (llm-pick-render-report--section
         (format "\n=== Normalized to the anchor's model (%d) ===" (length exact))
