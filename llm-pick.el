@@ -1,13 +1,13 @@
 ;;; llm-pick.el --- Pick the best LLM by capability and price -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 madachuan
+;; Copyright (C) 2026 OverbearingPearl
 ;; Author: madachuan <madachuan.noreply.github.com>
 ;; Assisted-by: Claude
 ;; URL: https://github.com/madachuan/llm-pick
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; Version: 0.0.1
-;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
+;; Package-Requires: ((emacs "28.1"))
 ;; Keywords: tools, convenience
 
 ;;; Commentary:
@@ -32,7 +32,7 @@
 ;; same axis the Pareto frontier and the price ladder use.
 ;;
 ;; Commands:
-;;   M-x llm-pick-menu             all of the below, in a transient menu
+;;   M-x llm-pick                  the main view of every model
 ;;   M-x llm-pick-report           a table of the models a query selects
 ;;   M-x llm-pick-report-query     the same, asking for the query first
 ;;   M-x llm-pick-report-frontier  the frontier with the gain per step
@@ -79,9 +79,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-;; The menu needs transient; Emacs 28 ships it, so nothing is installed.
-(require 'transient)
-
 ;; Bootstrap `load-path' from this file's location so that the package
 ;; works no matter where it is loaded from, including plain `load-file'.
 (defconst llm-pick--directory
@@ -107,6 +104,7 @@
 (require 'llm-pick-query-read)
 (require 'llm-pick-pick)
 (require 'llm-pick-render-report)
+(require 'llm-pick-view)
 
 ;;; User options
 
@@ -587,25 +585,15 @@ ARGS is a plist for `llm-pick-pick'."
              (or (llm-pick-core--field record 'score) "n/a")
              (or (llm-pick-core--field record 'or-out) "n/a"))))
 
-;;; The menu
-
-(transient-define-prefix llm-pick-menu ()
-  "Menu of the llm-pick commands.
-Every entry that takes arguments asks for them, so RET in the prompt
-accepts the default: `r' then RET shows every model."
-  [["Reports"
-    ("r" "Report" llm-pick-report)
-    ("q" "Report with a query" llm-pick-report-query)
-    ("f" "Pareto frontier" llm-pick-report-frontier)
-    ("l" "Price ladder" llm-pick-report-ladder)
-    ("b" "Benchmark against a model" llm-pick-report-benchmark)
-    ("t" "Best value" llm-pick-top-value)
-    ("c" "Cheap and strong" llm-pick-cheap-strong)]
-   ["Choose"
-    ("p" "Pick for criteria" llm-pick-pick-interactive)]
-   ["Data"
-    ("a" "Alignment report" llm-pick-align-report)
-    ("i" "Every ID problem" llm-pick-align-check)]])
+;;;###autoload
+(defun llm-pick ()
+  "Show the main view of every model from every registered source.
+The data is fetched once from every source and cached for
+`llm-pick-view-cache-ttl' seconds, so repeated calls do not download
+again.  The buffer supports hjkl/npfb cursor motion, RET opens the
+model view of the entry at point and q quits; see the header line."
+  (interactive)
+  (llm-pick-view-main))
 
 (provide 'llm-pick)
 

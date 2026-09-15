@@ -73,7 +73,7 @@ A new module file is picked up without touching this function."
                 (llm-pick-test--module-files))))
 
 (defun llm-pick-test--user-options ()
-  "Return an alist of (SYMBOL . VALUE) for every user set llm-pick option.
+  "Return an alist of (SYMBOL . VALUE) for every `llm-pick' user option.
 Only options the user really set are returned.  Customize marks them in
 the `saved-value' property once the value is saved and in
 `customized-value' when it is only set for the session.  An option which
@@ -188,7 +188,7 @@ fixture directory."
    :fetcher #'llm-pick-source--openrouter-loader))
 
 (defun llm-pick-test-run ()
-  "Reload the modules and run the whole llm-pick test suite."
+  "Reload the modules and run the whole `llm-pick' test suite."
   (interactive)
   (let ((dir default-directory))
     (llm-pick-test--reload)

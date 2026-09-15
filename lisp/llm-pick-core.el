@@ -1,6 +1,6 @@
 ;;; llm-pick-core.el --- Data model, field access and predicates -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 madachuan
+;; Copyright (C) 2026 OverbearingPearl
 ;; Author: madachuan <madachuan.noreply.github.com>
 ;; Assisted-by: Claude
 ;; URL: https://github.com/madachuan/llm-pick

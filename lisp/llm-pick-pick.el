@@ -1,6 +1,6 @@
 ;;; llm-pick-pick.el --- Choose one model and resolve a provider ID -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 madachuan
+;; Copyright (C) 2026 OverbearingPearl
 ;; Author: madachuan <madachuan.noreply.github.com>
 ;; Assisted-by: Claude
 ;; URL: https://github.com/madachuan/llm-pick
