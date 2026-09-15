@@ -252,11 +252,13 @@ left out and the service decides, see `llm-pick-source-openrouter-api-key'."
 OpenRouter quotes a price per token, as a string or as a number, so the
 value is scaled by a million.  Scaling by 1e12 and rounding to the
 nearest 1e-6 dollar keeps the float noise of the conversion out of the
-reports.  Nil when KEY is absent."
+reports.  A negative price, a sentinel such as -1e6 for the routing
+pseudo-models, is reported as missing.  Nil when KEY is absent."
   (let ((value (llm-pick-source--json-field pricing key)))
     (when (or (numberp value) (stringp value))
-      (let ((per-token (if (numberp value) value (string-to-number value))))
-        (/ (round (* per-token 1e12)) 1e6)))))
+      (let* ((per-token (if (numberp value) value (string-to-number value)))
+             (scaled (/ (round (* per-token 1e12)) 1e6)))
+        (and (>= scaled 0) scaled)))))
 
 (defun llm-pick-source--openrouter-prices (model)
   "Return the per million token prices of a parsed OpenRouter MODEL, or nil."

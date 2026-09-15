@@ -81,11 +81,29 @@ a pointer to the command that collects them all."
     ;; model is its name.  Both spellings have to be here, or the pair
     ;; keeps a vendor segment on one side and never meets.
     ("\\`\\(?:openai\\|anthropic\\|google\\|meta-llama\\|mistralai\\|deepseek\\|cohere\\|amazon\\|azure\\|qwen\\|alibaba\\|x-ai\\|xai\\|moonshotai\\|moonshot-ai\\|thinkingmachines\\|thinking-machines-lab\\)/" . "")
+    ;; A bracketed qualifier is rewritten into its hyphen form before
+    ;; the suffix and punctuation rules: the two catalogues spell these
+    ;; qualifiers differently (benchlm as `-(high)' or `-[beta]',
+    ;; openrouter as `-high' or `-beta'), so `model-(high)' and
+    ;; `model-high' both land on `model-high', and `grok-3-[beta]' lands
+    ;; on `grok-3-beta', which the suffix rule below then strips.  The
+    ;; word list covers high, low, medium, preview, reasoning, thinking,
+    ;; adaptive, mini and beta.  Rewritten once, `model-high' no longer
+    ;; matches and the rule stays idempotent.
+    ("-?(\\(high\\|low\\|medium\\|preview\\|reasoning\\|thinking\\|adaptive\\|mini\\|beta\\))" . "-\\1")
+    ("-?\\[\\(high\\|low\\|medium\\|preview\\|reasoning\\|thinking\\|adaptive\\|mini\\|beta\\)\\]" . "-\\1")
     (":.*\\'" . "")
     ("\\(?:-instruct\\|-it\\|-chat\\|-base\\|-beta\\|-free\\|-latest\\)\\'" . "")
     ("-[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" . "")
     ("-[0-9]\\{4,8\\}\\'" . "")
     ("[:/.]" . "-")
+    ;; A family word the catalogue spells twice is collapsed to one
+    ;; copy: `ibm-granite/granite-4.0-h-micro' keeps one `granite' and
+    ;; meets the anchor's `ibm-granite-...' spelling, and
+    ;; `bytedance-seed/seed-2.0-lite' keeps one `seed'.  The inserted
+    ;; form ends in a hyphen before a different word, so it cannot
+    ;; rematch and the rule stays idempotent.
+    ("\\([a-z][a-z0-9]*\\)-\\1-" . "\\1-")
     ("_+" . "-")
     ("-+" . "-")
     ("\\`-\\|-\\'" . ""))
@@ -113,7 +131,28 @@ Whitespace becomes a dash, so a source that names a model by its display
 name (`Claude 3.5 Sonnet') meets the ID another source spells
 `claude-3.5-sonnet'.  A vendor that spells its own name twice keeps one
 copy, which is what keeps `minimax-minimax-m2' from covering 18 of the 20
-characters of both `M2.5' and `M2.7' and tying them.
+characters of both `M2.5' and `M2.7' and tying them.  A family word the
+catalogue spells twice (`ibm-granite/granite-4.0-h-micro', which the
+punctuation rule turns into `ibm-granite-granite-4.0-h-micro') is
+collapsed to one copy the same way, so the pair meets on
+`ibm-granite-4.0-h-micro', and `bytedance-seed/seed-2.0-lite' keeps one
+`seed'.
+
+The two catalogues also spell bracketed qualifiers differently:
+benchlm writes `-(high)' or `-[beta]' where openrouter writes `-high' or
+`-beta', so two rules rewrite the parenthesized and square-bracket forms
+into the hyphen form and both sides land on the same string.  The word
+list covers `medium' as well as high, low, preview, reasoning, thinking,
+adaptive, mini and beta.  The rules match the brackets and never a bare
+`-word-', because matching `-mini-' would eat the hyphen of
+`gpt-4o-mini' and split that ID from the one openrouter spells with no
+qualifier.  They run before the suffix-stripping rules, because the
+rewritten `-high' and `-beta' are themselves suffixes those rules
+understand.
+
+A dot inside a version is the punctuation rule's job: `qwen3.8-max'
+becomes `qwen3-8-max' and `minimax-m2.7' stays `minimax-m2-7', with no
+hyphen inserted before the version digit.
 
 Release suffixes come before the release dates, so that `model:beta' and
 `model' meet on the same canonical ID.  Only a suffix that names the same

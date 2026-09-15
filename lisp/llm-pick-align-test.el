@@ -53,7 +53,17 @@
                  ("Thinking Machines Lab/Inkling" . "thinkingmachines/inkling")
                  ;; `-it' is the instruction tuned marker of the Gemma
                  ;; family, the same kind of suffix as `-instruct'.
-                 ("Google/Gemma 4 26B A4B" . "google/gemma-4-26b-a4b-it")))
+                 ("Google/Gemma 4 26B A4B" . "google/gemma-4-26b-a4b-it")
+                 ;; These pairs come from the live catalogues where the
+                 ;; leaderboard writes `-(high)' and the price catalogue
+                 ;; `-high'.
+                 ("openai/o4-mini-(high)" . "openai/o4-mini-high")
+                 ("qwen/qwen3.6-max-(preview)" . "qwen/qwen3.6-max-preview")
+                 ;; These pairs also come from the live catalogues where
+                 ;; the bracket form and the plain form must normalize
+                 ;; alike, since `-beta' is stripped as a release suffix.
+                 ("openai/gpt-5-(medium)" . "openai/gpt-5-medium")
+                 ("x-ai/grok-3-[beta]" . "x-ai/grok-3")))
         (broken nil))
     (dolist (pair pairs)
       (let ((left (llm-pick-align--normalize (car pair)))
