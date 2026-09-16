@@ -189,13 +189,13 @@ Commentary of `llm-pick-source' for the snapshot layout."
 ;;; Service loaders
 
 (defun llm-pick-source--benchlm-url (category)
-  "Return the leaderboard URL that carries CATEGORY.
-A nil CATEGORY asks for every category, and the limit is the maximum the
-service documents, so that a report sees every model it tracks."
-  (concat llm-pick-fetch-get--benchlm-url
-          "?limit=200"
-          (when category
-            (concat "&category=" (url-hexify-string category)))))
+  "Return the leaderboard URL for CATEGORY.
+A nil CATEGORY asks for every category; otherwise CATEGORY selects one
+leaderboard category via the category query parameter."
+  (if category
+      (concat llm-pick-fetch-get--benchlm-url
+              "?category=" (url-hexify-string category))
+    llm-pick-fetch-get--benchlm-url))
 
 (defun llm-pick-source--benchlm-id (model)
   "Return the ID of a parsed BenchLM MODEL.
@@ -304,9 +304,17 @@ category does not change the answer."
     (cl-loop for model in models
              for id = (llm-pick-source--json-field model "id")
              when id
-             collect (append (list :id id
+             ;; A ~-prefixed latest alias points at a concrete version via
+             ;; \"alias_target\"; use the target slug as the canonical id so
+             ;; the alias merges into that version instead of staying an
+             ;; unmatched ~-prefixed entry.
+             for alias-target = (llm-pick-source--json-field model "alias_target")
+             for slug = (and alias-target
+                             (llm-pick-source--json-field alias-target "slug"))
+             for canonical-id = (or slug id)
+             collect (append (list :id canonical-id
                                    :display-name (or (llm-pick-source--json-field model "name")
-                                                     id)
+                                                     canonical-id)
                                    :providers (list (cons 'openrouter id)))
                              (let ((prices (llm-pick-source--openrouter-prices model)))
                                (when prices (list :prices prices)))))))

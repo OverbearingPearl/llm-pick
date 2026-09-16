@@ -150,11 +150,14 @@ caches away first."
 ;;; Record helpers
 
 (defun llm-pick-view--record-sources (record)
-  "Return the sorted names of the sources that name RECORD."
+  "Return the sorted names of the sources that name RECORD.
+This includes provider sources."
   (let (sources)
     (dolist (key (plist-get record :scores))
       (cl-pushnew (if (consp (car key)) (caar key) (car key)) sources))
     (dolist (pair (plist-get record :prices))
+      (cl-pushnew (car pair) sources))
+    (dolist (pair (plist-get record :providers))
       (cl-pushnew (car pair) sources))
     (sort sources (lambda (a b) (string< (symbol-name a) (symbol-name b))))))
 
@@ -348,13 +351,14 @@ per source holds what only that source lists."
         shared-key)
     (dolist (record records)
       (let ((sources (llm-pick-view--record-sources record)))
-        (if (> (length sources) 1)
-            (progn
-              (setq shared-key (mapcar #'symbol-name sources))
-              (puthash shared-key (cons record (gethash shared-key shared))
-                       shared))
-          (let ((key (list (mapcar #'symbol-name sources))))
-            (puthash key (cons record (gethash key only)) only)))))
+        (when sources
+          (if (> (length sources) 1)
+              (progn
+                (setq shared-key (mapcar #'symbol-name sources))
+                (puthash shared-key (cons record (gethash shared-key shared))
+                         shared))
+            (let ((key (list (mapcar #'symbol-name sources))))
+              (puthash key (cons record (gethash key only)) only))))))
     (append
      (when shared-key
        (list (cons "shared by several sources"

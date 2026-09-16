@@ -94,7 +94,7 @@ a pointer to the command that collects them all."
     ("-?(\\(high\\|low\\|medium\\|preview\\|reasoning\\|thinking\\|adaptive\\|mini\\|beta\\))" . "-\\1")
     ("-?\\[\\(high\\|low\\|medium\\|preview\\|reasoning\\|thinking\\|adaptive\\|mini\\|beta\\)\\]" . "-\\1")
     (":.*\\'" . "")
-    ("\\(?:-instruct\\|-it\\|-chat\\|-base\\|-beta\\|-free\\|-latest\\)\\'" . "")
+    ("\\(?:-instruct\\|-it\\|-v\\|-chat\\|-base\\|-beta\\|-free\\|-latest\\)\\'" . "")
     ("-[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" . "")
     ("-[0-9]\\{4,8\\}\\'" . "")
     ("[:/.]" . "-")
@@ -166,6 +166,10 @@ A date is not one of them either, and a date is often four digits:
 `deepseek-v4-pro-0813' is a snapshot of `deepseek-v4-pro', so the rule
 that drops a trailing number looks for four.  Never fewer: that would eat
 the `4' of `gpt-4' and the `8' of `llama-3.1-8b'.
+
+`-v' and `-chat' are also spellings of the same model, so `z-ai/glm-4.6v'
+meets benchlm's `Z.ai/GLM-4.6' and `openai/gpt-5.2-chat' meets
+`OpenAI/GPT-5.2'.
 
 Add a rule at the position that keeps the order meaningful, and add the ID
 pair it fixes to lisp/llm-pick-align-test.el.  Emacs regexps have no digit
