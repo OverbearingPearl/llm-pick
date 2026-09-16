@@ -12,11 +12,8 @@
 (require 'ert)
 (require 'llm-pick-source)
 
-(defconst llm-pick-source-test--fixture-directory
-  (let ((directory (make-temp-file "llm-pick-source-test-" t)))
-    (dolist (snapshot
-             '(("benchlm-sample.json" .
-                "{
+(defconst llm-pick-source-test--benchlm-json
+  "{
   \"note\": \"Illustrative sample data; not real benchmark results.\",
   \"models\": [
     {
@@ -53,9 +50,12 @@
       \"scores\": { \"coding\": 70, \"math\": 70 }
     }
   ]
-}")
-               ("openrouter-sample.json" .
-                "{
+}"
+  "Inline benchlm JSON snapshot used by these tests.
+Illustrative sample data; not real benchmark results.")
+
+(defconst llm-pick-source-test--openrouter-json
+  "{
   \"note\": \"Illustrative sample prices; not real quotes.\",
   \"models\": [
     {
@@ -97,9 +97,12 @@
       \"pricing\": { \"prompt\": 0.35, \"completion\": 0.4 }
     }
   ]
-}")
-               ("artificial-analysis-sample.json" .
-                "{
+}"
+  "Inline OpenRouter JSON snapshot used by these tests.
+Illustrative sample prices; not real quotes.")
+
+(defconst llm-pick-source-test--artificial-analysis-json
+  "{
   \"note\": \"Illustrative Artificial Analysis indexes; not real results.\",
   \"models\": [
     {
@@ -133,18 +136,14 @@
       \"scores\": { \"intelligence\": 25, \"coding\": 65, \"agentic\": 30 }
     }
   ]
-}")))
-      (with-temp-file (expand-file-name (car snapshot) directory)
-        (insert (cdr snapshot))))
-    directory)
-  "Directory holding the JSON snapshots these tests read.
-The snapshots are the literals above, written to a temporary directory
-when this file is loaded, so the suite builds the JSON it depends on
-instead of shipping snapshot files.")
+}"
+  "Inline Artificial Analysis JSON snapshot used by these tests.
+Illustrative Artificial Analysis indexes; not real results.
+Also referenced by the secondary-price tests as an extra source.")
 
 (defconst llm-pick-source-test--fixture
-  (expand-file-name "benchlm-sample.json" llm-pick-source-test--fixture-directory)
-  "Snapshot of the capability source used by these tests.")
+  llm-pick-source-test--benchlm-json
+  "The capability snapshot these fixture-loader tests read, inline JSON.")
 
 (defun llm-pick-source-test--score-of (name records)
   "Return the score of the record named NAME among RECORDS."
@@ -161,13 +160,13 @@ instead of shipping snapshot files.")
                               :loader #'ignore)
     (ert-info ("A new source is appended in registration order")
       (should (equal (mapcar #'car llm-pick-source-sources)
-                     '(artificial-analysis benchlm openrouter test-source))))
+                     '(benchlm openrouter test-source))))
     (llm-pick-source-register 'test-source :kind 'both
                               :description "second"
                               :loader #'ignore)
     (ert-info ("Re-registering keeps the position and replaces the descriptor")
       (should (equal (mapcar #'car llm-pick-source-sources)
-                     '(artificial-analysis benchlm openrouter test-source)))
+                     '(benchlm openrouter test-source)))
       (should (equal (plist-get (cdr (assq 'test-source llm-pick-source-sources))
                                 :description)
                      "second")))))
@@ -193,9 +192,7 @@ instead of shipping snapshot files.")
 (ert-deftest llm-pick-source-test-fixture-loader-price ()
   (let ((entries (llm-pick-source--fixture-loader
                   (list :kind 'price
-                        :fixture (expand-file-name
-                                  "openrouter-sample.json"
-                                  llm-pick-source-test--fixture-directory)))))
+                        :fixture llm-pick-source-test--openrouter-json))))
     (ert-info ("A price entry carries :in and :out per million tokens")
       (should (equal (mapcar (lambda (entry)
                                (list (plist-get entry :id)
@@ -210,16 +207,16 @@ instead of shipping snapshot files.")
 
 (ert-deftest llm-pick-source-test-fixture-loader-missing-file ()
   (ert-info ("A missing snapshot is a loud error, not an empty result")
-    (should-error (llm-pick-source--fixture-loader
-                   (list :kind 'capability
-                         :fixture (expand-file-name
-                                   "no-such-snapshot.json"
-                                   llm-pick-source-test--fixture-directory)))
-                  :type 'llm-pick-error)))
+    (let ((llm-pick-source-fixture-directory (make-temp-file "llm-pick-source-test-" t)))
+      (should-error (llm-pick-source--fixture-loader
+                     (list :kind 'capability
+                           :fixture (expand-file-name
+                                     "no-such-snapshot.json"
+                                     llm-pick-source-fixture-directory)))
+                    :type 'llm-pick-error))))
 
 (ert-deftest llm-pick-source-test-collect-merges-sources ()
-  (let ((llm-pick-source-fixture-directory llm-pick-source-test--fixture-directory)
-        ;; The suite never opens a socket: the snapshots are the data.
+  (let (;; The suite never opens a socket: the snapshots are the data.
         (llm-pick-source-offline t)
         (llm-pick-core-default-capability-source 'benchlm)
         (llm-pick-core-default-price-source 'openrouter)
@@ -253,8 +250,7 @@ instead of shipping snapshot files.")
                          (openrouter . "openai/gpt-4o"))))))))
 
 (ert-deftest llm-pick-source-test-collect-category-selects-score ()
-  (let ((llm-pick-source-fixture-directory llm-pick-source-test--fixture-directory)
-        (llm-pick-source-offline t)
+  (let ((llm-pick-source-offline t)
         (llm-pick-core-default-capability-source 'benchlm)
         (llm-pick-core-default-price-source 'openrouter))
     (let ((coding (llm-pick-source-test--score-of
@@ -270,8 +266,7 @@ instead of shipping snapshot files.")
         (should (equal (list coding math best) '(88 80 88)))))))
 
 (ert-deftest llm-pick-source-test-collect-without-capability-source ()
-  (let ((llm-pick-source-fixture-directory llm-pick-source-test--fixture-directory)
-        (llm-pick-source-offline t)
+  (let ((llm-pick-source-offline t)
         (llm-pick-core-default-capability-source 'benchlm)
         (llm-pick-core-default-price-source 'openrouter)
         (llm-pick-align-on-unmatched 'standalone))
@@ -283,8 +278,7 @@ instead of shipping snapshot files.")
                        '(price-only)))))))
 
 (ert-deftest llm-pick-source-test-collect-two-categories-keys-the-scores ()
-  (let ((llm-pick-source-fixture-directory llm-pick-source-test--fixture-directory)
-        (llm-pick-source-offline t)
+  (let ((llm-pick-source-offline t)
         (llm-pick-core-default-capability-source 'benchlm)
         (llm-pick-core-default-price-source 'openrouter)
         (llm-pick-align-match-threshold 0.85)
@@ -373,8 +367,7 @@ The prices are per token, which is how the service quotes them.")
         (should (= (plist-get (plist-get (cadr entries) :prices) :out) 0.1))))))
 
 (ert-deftest llm-pick-source-test-collect-picks-the-fetcher-when-online ()
-  (let ((llm-pick-source-fixture-directory llm-pick-source-test--fixture-directory)
-        (llm-pick-core-default-capability-source 'benchlm)
+  (let ((llm-pick-core-default-capability-source 'benchlm)
         (llm-pick-core-default-price-source 'openrouter)
         (llm-pick-source-offline nil)
         (fetched 0)
@@ -393,8 +386,7 @@ The prices are per token, which is how the service quotes them.")
         (should (= snapshotted 0))))))
 
 (ert-deftest llm-pick-source-test-collect-picks-the-snapshot-when-offline ()
-  (let ((llm-pick-source-fixture-directory llm-pick-source-test--fixture-directory)
-        (llm-pick-core-default-capability-source 'benchlm)
+  (let ((llm-pick-core-default-capability-source 'benchlm)
         (llm-pick-core-default-price-source 'openrouter)
         (llm-pick-source-offline t)
         (fetched 0))

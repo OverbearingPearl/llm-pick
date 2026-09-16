@@ -37,7 +37,8 @@
   "Regexp matching a test file name.")
 
 (defconst llm-pick-test--reset-vars
-  '(llm-pick-align--last-report)
+  '(llm-pick-align--last-report
+    llm-pick-source-sources)
   "Variables that must not survive a reload.
 Only caches belong here.  Defcustoms are covered by
 `llm-pick-test--stale-option-p' and `llm-pick-test--user-options'; do
@@ -169,30 +170,11 @@ now."
 (defun llm-pick-test--register-sources ()
   "Register the sources used by the test suite.
 
-The built-in sources read their service only, so the suite supplies
-the illustrative snapshots itself, which is why every test binds the
-fixture directory."
-  (llm-pick-source-register
-   'benchlm
-   :kind 'capability
-   :description "BenchLM capability scores"
-   :loader #'llm-pick-source--fixture-loader
-   :fixture "benchlm-sample.json"
-   :fetcher #'llm-pick-source--benchlm-loader)
-  (llm-pick-source-register
-   'openrouter
-   :kind 'price
-   :description "OpenRouter pricing"
-   :loader #'llm-pick-source--fixture-loader
-   :fixture "openrouter-sample.json"
-   :fetcher #'llm-pick-source--openrouter-loader)
-  (llm-pick-source-register
-   'artificial-analysis
-   :kind 'capability
-   :description "Artificial Analysis indexes via OpenRouter"
-   :loader #'llm-pick-source--fixture-loader
-   :fixture "artificial-analysis-sample.json"
-   :fetcher #'llm-pick-source--openrouter-benchmarks-loader))
+The snapshots live in `llm-pick-fixture-test' as inline JSON, so this
+function only needs to load that library, which registers the sources
+themselves."
+  (require 'llm-pick-fixture-test)
+  nil)
 
 (defun llm-pick-test-run ()
   "Reload the modules and run the whole `llm-pick' test suite."

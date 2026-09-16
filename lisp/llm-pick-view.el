@@ -188,7 +188,7 @@ Artificial Analysis scores, value, prices, and OpenRouter id."
                  (mapcar
                   (lambda (cat)
                     (llm-pick-view--num
-                     (llm-pick-core--score record 'artificial-analysis cat)))
+                     (llm-pick-core--score record 'openrouter cat)))
                   aa-categories)
                  (list (llm-pick-view--num (llm-pick-core--field record 'value)))
                  (list (llm-pick-view--num (llm-pick-core--field record 'bm-in))
@@ -212,7 +212,7 @@ Artificial Analysis scores, value, prices, and OpenRouter id."
   "Insert the column header line with `llm-pick-view-column-face'."
   (let* ((benchlm-cats '("Agentic" "Coding" "Reasoning" "Multimodal"
                          "Knowledge" "Multiling" "Instr-F" "Math"))
-         (aa-cats '("AA-Int" "AA-Code" "AA-Agnt"))
+         (aa-cats '("OR-Int" "OR-Code" "OR-Agnt"))
          (head (concat (format "%-44s  %9s" "Model" "Score")))
          (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) benchlm-cats "  ")))
          (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) aa-cats "  ")))
