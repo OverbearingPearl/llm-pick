@@ -195,7 +195,10 @@ themselves."
       (let ((default-directory dir))
         (if noninteractive
             (ert-run-tests-batch-and-exit "llm-pick-")
-          (ert "llm-pick-"))))))
+          (ert "llm-pick-")))
+      ;; The fixture descriptors registered above survive the run and would
+      ;; pollute the user session, so reload the built-in registrations.
+      (load (expand-file-name "lisp/llm-pick-source.el" llm-pick-test--root) nil t))))
 
 (provide 'llm-pick-test)
 

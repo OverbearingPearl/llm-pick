@@ -540,13 +540,14 @@ NAMES."
 (defun llm-pick-source--merge-entry (record source entry)
   "Return RECORD after merging one ENTRY of SOURCE into it.
 A source contributes at most one score, one price plist and one ID per
-provider; the first entry that reaches a canonical ID wins.  A record
-that spans several categories keys its scores by (SOURCE . CATEGORY),
-one that spans a single one keys them by SOURCE."
+provider; the first entry that reaches a canonical ID wins.  An entry
+with a :category is keyed by the pair (SOURCE . CATEGORY) so its column
+can be read per category; only an entry without a category is keyed by
+SOURCE."
   (let* ((score (plist-get entry :score))
          (category (plist-get entry :category))
-         (score-key (if (and category (cdr (plist-get record :categories)))
-                        (cons source category)
+         (score-key (if category
+                        (cons source (llm-pick-core--category-name category))
                       source))
          (prices (plist-get entry :prices))
          (providers (plist-get entry :providers))
