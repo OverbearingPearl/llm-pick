@@ -44,6 +44,21 @@
   :group 'llm-pick
   :prefix "llm-pick-view-")
 
+(defface llm-pick-view-title-face
+  '((t :weight bold :height 1.1))
+  "Face used to distinguish the title from the entries."
+  :group 'llm-pick-view)
+
+(defface llm-pick-view-header-face
+  '((t :weight bold :inherit font-lock-keyword-face :overline t))
+  "Face used to distinguish section headers from the entries."
+  :group 'llm-pick-view)
+
+(defface llm-pick-view-column-face
+  '((t :weight bold :inherit font-lock-type-face))
+  "Face used to distinguish the column legend from the entries."
+  :group 'llm-pick-view)
+
 (defcustom llm-pick-view-cache-ttl 86400
   "Seconds a collected set of records stays fresh on disk.
 86400 is one day: within it, opening a view downloads nothing."
@@ -91,6 +106,17 @@ Buffer-local state is derived from this; a refresh replaces it.")
     (and attrs
          (< (float-time (time-subtract (current-time) (nth 5 attrs)))
             llm-pick-view-cache-ttl))))
+
+(defun llm-pick-view-clear-cache ()
+  "Delete the on-disk records cache and drop the in-memory one."
+  (interactive)
+  (let ((file (llm-pick-view--cache-file)))
+    (when (file-exists-p file)
+      (delete-file file))
+    (setq llm-pick-view--records nil)
+    (if (file-exists-p file)
+        (message "Cache file %s could not be deleted" file)
+      (message "Cache cleared%s" (if (file-exists-p file) "" "")))))
 
 (defun llm-pick-view--save-cache (records)
   "Write RECORDS to the cache file, ignoring write errors."
@@ -150,8 +176,18 @@ caches away first."
 (defun llm-pick-view--insert-header (title &optional note)
   "Insert a section header TITLE with an optional NOTE under it."
   (let ((start (point)))
-    (insert "\n" title "\n")
+    (insert (propertize title 'face 'llm-pick-view-header-face) "\n")
     (when note (insert note "\n"))
+    (put-text-property start (point) 'llm-pick-header t)))
+
+(defun llm-pick-view--insert-columns (columns)
+  "Insert the column header line of COLUMNS with `llm-pick-view-column-face'."
+  (let ((start (point)))
+    (insert (propertize
+             (format "%-44s %6s  %9s  %9s"
+                     (nth 0 columns) (nth 1 columns) (nth 2 columns) (nth 3 columns))
+             'face 'llm-pick-view-column-face)
+            "\n")
     (put-text-property start (point) 'llm-pick-header t)))
 
 (defun llm-pick-view--insert-entry (record)
@@ -169,7 +205,9 @@ caches away first."
 BODY is a function inserting the buffer content."
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (insert title "\n" (make-string (length title) ?=) "\n")
+    (insert (propertize title 'face 'llm-pick-view-title-face) "\n"
+            (propertize (make-string (length title) ?=) 'face 'font-lock-comment-face)
+            "\n")
     (funcall body)
     (goto-char (point-min))
     (setq llm-pick-view--kind kind
@@ -316,6 +354,8 @@ share first, then one section per source for what it lists alone."
      (format "llm-pick: %d of %d models"
              (length kept) (length records))
      (lambda ()
+       (llm-pick-view--insert-columns '("Model" "Score" "In $/M" "Value"))
+       (insert "\n")
        (dolist (group groups)
          (llm-pick-view--insert-header (car group))
          (llm-pick-view--insert-entries (cdr group)))))))
