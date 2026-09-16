@@ -185,7 +185,14 @@ fixture directory."
    :description "OpenRouter pricing"
    :loader #'llm-pick-source--fixture-loader
    :fixture "openrouter-sample.json"
-   :fetcher #'llm-pick-source--openrouter-loader))
+   :fetcher #'llm-pick-source--openrouter-loader)
+  (llm-pick-source-register
+   'artificial-analysis
+   :kind 'capability
+   :description "Artificial Analysis indexes via OpenRouter"
+   :loader #'llm-pick-source--fixture-loader
+   :fixture "artificial-analysis-sample.json"
+   :fetcher #'llm-pick-source--openrouter-benchmarks-loader))
 
 (defun llm-pick-test-run ()
   "Reload the modules and run the whole `llm-pick' test suite."

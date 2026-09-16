@@ -38,6 +38,40 @@
   "https://openrouter.ai/api/v1/models"
   "Endpoint of the OpenRouter model list.")
 
+(defconst llm-pick-fetch-get--openrouter-benchmarks-url
+  "https://openrouter.ai/api/v1/benchmarks"
+  "Endpoint of the OpenRouter benchmarks endpoint.
+
+It is the source of the Artificial Analysis capability indices.")
+
+(defconst llm-pick-fetch-get--openrouter-benchmarks-url
+  "https://openrouter.ai/api/v1/benchmarks"
+  "Endpoint of the OpenRouter benchmarks.")
+
+(defun llm-pick-fetch-get--openrouter-auth ()
+  "Return the bearer token for openrouter.ai, or nil if unavailable.
+Try, in order: the variable `llm-pick-source-openrouter-api-key',
+the OPENROUTER_API_KEY environment variable, and finally
+`auth-source-search' with :host \"openrouter.ai\"."
+  (cond
+   ((and (boundp 'llm-pick-source-openrouter-api-key)
+         llm-pick-source-openrouter-api-key)
+    llm-pick-source-openrouter-api-key)
+   ((getenv "OPENROUTER_API_KEY"))
+   (t
+    (require 'auth-source)
+    (let ((entry (car (auth-source-search
+                       :host "openrouter.ai"
+                       :require '(secret)
+                       :create nil))))
+      (when entry
+        (let ((secret (plist-get entry :secret)))
+          (when secret
+            (setq secret (if (functionp secret) (funcall secret) secret))
+            (if (multibyte-string-p secret)
+                secret
+              (decode-coding-string secret 'utf-8)))))))))
+
 ;;; HTTP
 
 (defun llm-pick-fetch-get--status (buffer url)

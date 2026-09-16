@@ -163,13 +163,38 @@ caches away first."
   (if (numberp value) (format "%g" value) "-"))
 
 (defun llm-pick-view--line (record)
-  "Return one summary line for RECORD."
-  (format "%-44s %6s  %9s  %9s"
-          (or (plist-get record :display-name)
-              (llm-pick-core--field record 'name))
-          (llm-pick-view--num (llm-pick-core--field record 'score))
-          (llm-pick-view--num (llm-pick-core--field record 'or-out))
-          (llm-pick-view--num (llm-pick-core--field record 'value))))
+  "Return one summary line for RECORD.
+Columns: model name, overall score, BenchLM category scores,
+Artificial Analysis scores, value, prices, and OpenRouter id."
+  (let* ((benchlm-categories
+          (sort (cl-loop for (key . _) in (plist-get record :scores)
+                         when (and (consp key) (eq (car key) 'benchlm))
+                         collect (cdr key))
+                #'string<))
+         (aa-categories '("intelligence" "coding" "agentic"))
+         (cells (append
+                 (list (format "%-44s"
+                               (or (plist-get record :display-name)
+                                   (llm-pick-core--field record 'name))))
+                 (list (llm-pick-view--num (llm-pick-core--field record 'score)))
+                 (mapcar
+                  (lambda (cat)
+                    (llm-pick-view--num
+                     (llm-pick-core--score record 'benchlm cat)))
+                  benchlm-categories)
+                 (mapcar
+                  (lambda (cat)
+                    (llm-pick-view--num
+                     (llm-pick-core--score record 'artificial-analysis cat)))
+                  aa-categories)
+                 (list (llm-pick-view--num (llm-pick-core--field record 'value)))
+                 (list (llm-pick-view--num (llm-pick-core--field record 'bm-in))
+                       (llm-pick-view--num (llm-pick-core--field record 'bm-out)))
+                 (list (llm-pick-view--num (llm-pick-core--field record 'or-in))
+                       (llm-pick-view--num (llm-pick-core--field record 'or-out)))
+                 (list (or (cdr (assq 'openrouter (plist-get record :providers)))
+                           "-")))))
+    (mapconcat #'identity cells "  ")))
 
 ;;; Rendering primitives
 
@@ -180,14 +205,20 @@ caches away first."
     (when note (insert note "\n"))
     (put-text-property start (point) 'llm-pick-header t)))
 
-(defun llm-pick-view--insert-columns (columns)
-  "Insert the column header line of COLUMNS with `llm-pick-view-column-face'."
-  (let ((start (point)))
-    (insert (propertize
-             (format "%-44s %6s  %9s  %9s"
-                     (nth 0 columns) (nth 1 columns) (nth 2 columns) (nth 3 columns))
-             'face 'llm-pick-view-column-face)
-            "\n")
+(defun llm-pick-view--insert-columns (&optional _columns)
+  "Insert the column header line with `llm-pick-view-column-face'."
+  (let* ((benchlm-cats '("Agentic" "Coding" "Reasoning" "Multimodal"
+                         "Knowledge" "Multiling" "Instr-F" "Math"))
+         (aa-cats '("AA-Int" "AA-Code" "AA-Agnt"))
+         (head (concat (format "%-44s  %9s" "Model" "Score")))
+         (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) benchlm-cats "  ")))
+         (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) aa-cats "  ")))
+         (head (concat head "  " (format "%9s" "Value")))
+         (head (concat head "  " (format "%14s" "In/Out (BL)")))
+         (head (concat head "  " (format "%14s" "In/Out (OR)")))
+         (head (concat head "  " (format "%24s" "OpenRouter id")))
+         (start (point)))
+    (insert (propertize head 'face 'llm-pick-view-column-face) "\n")
     (put-text-property start (point) 'llm-pick-header t)))
 
 (defun llm-pick-view--insert-entry (record)

@@ -83,9 +83,9 @@ ARGS is a plist of fields merged into the record, for instance
 (defun llm-pick-core--field (m field)
   "Return the value of FIELD in the model record M.
 FIELD is the symbol `name', `provider', `vendor', `family', `scope',
-`score', `or-in', `or-out', `bm-in', `bm-out', `gap' or `value', or a
-list of the form \(score SOURCE), \(score SOURCE CATEGORY) or
-\(price SOURCE DIRECTION).
+`score', `or-in', `or-out', `bm-in', `bm-out', `gap', `value' or
+`openrouter-id', or a list of the form \(score SOURCE), \(score SOURCE
+CATEGORY) or \(price SOURCE DIRECTION).
 `vendor' and `family' are read off the canonical ID rather than stored,
 and neither is ever guessed: `vendor' is the company the lookup table
 knows, and `family' is the first word of the model name, answered only
@@ -110,6 +110,7 @@ The value is nil when M does not carry the requested information."
     ('bm-out (llm-pick-core--price m llm-pick-core-secondary-price-source 'out))
     ('gap (llm-pick-core--price-gap m))
     ('value (llm-pick-core--value m))
+    ('openrouter-id (cdr (assq 'openrouter (plist-get m :providers))))
     (`(score ,source) (llm-pick-core--score m source nil))
     (`(score ,source ,category) (llm-pick-core--score m source category))
     (`(price ,source ,direction) (llm-pick-core--price m source direction))
@@ -221,6 +222,26 @@ carries; nil reads the score of a record collected for one."
     (if category
         (cdr (assoc (cons source (llm-pick-core--category-name category)) scores))
       (cdr (assoc source scores)))))
+
+(defun llm-pick-core--benchlm-categories (m)
+  "Return the BenchLM category names carried by record M's :scores.
+The categories come back in first-appearance order."
+  (let ((result '())
+        (seen (make-hash-table :test #'equal)))
+    (dolist (key (plist-get m :scores) (nreverse result))
+      (let ((cat (cond
+                  ((and (consp key) (eq (car key) 'benchlm)
+                        (stringp (cdr key)))
+                   (cdr key))
+                  ((and (consp key) (eq (car key) 'benchlm)
+                        (consp (cdr key)) (null (cddr key))
+                        (or (stringp (cadr key)) (symbolp (cadr key))))
+                   (if (symbolp (cadr key))
+                       (symbol-name (cadr key))
+                     (cadr key))))))
+        (when (and cat (not (gethash cat seen)))
+          (puthash cat t seen)
+          (push cat result))))))
 
 (defun llm-pick-core--default-score (m)
   "Return the score of M at `llm-pick-core-default-capability-source'.

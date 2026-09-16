@@ -97,6 +97,42 @@
       \"pricing\": { \"prompt\": 0.35, \"completion\": 0.4 }
     }
   ]
+}")
+               ("artificial-analysis-sample.json" .
+                "{
+  \"note\": \"Illustrative Artificial Analysis indexes; not real results.\",
+  \"models\": [
+    {
+      \"id\": \"claude-3.5-sonnet\",
+      \"name\": \"Claude 3.5 Sonnet\",
+      \"provider_ids\": { \"openrouter\": \"anthropic/claude-3.5-sonnet\" },
+      \"scores\": { \"intelligence\": 50, \"coding\": 88, \"agentic\": 55 }
+    },
+    {
+      \"id\": \"gpt-4o\",
+      \"name\": \"GPT-4o\",
+      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o\" },
+      \"scores\": { \"intelligence\": 48, \"coding\": 92, \"agentic\": 60 }
+    },
+    {
+      \"id\": \"gpt-4o-mini\",
+      \"name\": \"GPT-4o mini\",
+      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o-mini\" },
+      \"scores\": { \"intelligence\": 35, \"coding\": 78, \"agentic\": 45 }
+    },
+    {
+      \"id\": \"gemini-1.5-flash\",
+      \"name\": \"Gemini 1.5 Flash\",
+      \"provider_ids\": { \"openrouter\": \"google/gemini-flash-1.5\" },
+      \"scores\": { \"intelligence\": 40, \"coding\": 82, \"agentic\": 48 }
+    },
+    {
+      \"id\": \"llama-3.1-8b\",
+      \"name\": \"Llama 3.1 8B\",
+      \"provider_ids\": { \"openrouter\": \"meta-llama/llama-3.1-8b-instruct\" },
+      \"scores\": { \"intelligence\": 25, \"coding\": 65, \"agentic\": 30 }
+    }
+  ]
 }")))
       (with-temp-file (expand-file-name (car snapshot) directory)
         (insert (cdr snapshot))))
@@ -125,13 +161,13 @@ instead of shipping snapshot files.")
                               :loader #'ignore)
     (ert-info ("A new source is appended in registration order")
       (should (equal (mapcar #'car llm-pick-source-sources)
-                     '(benchlm openrouter test-source))))
+                     '(artificial-analysis benchlm openrouter test-source))))
     (llm-pick-source-register 'test-source :kind 'both
                               :description "second"
                               :loader #'ignore)
     (ert-info ("Re-registering keeps the position and replaces the descriptor")
       (should (equal (mapcar #'car llm-pick-source-sources)
-                     '(benchlm openrouter test-source)))
+                     '(artificial-analysis benchlm openrouter test-source)))
       (should (equal (plist-get (cdr (assq 'test-source llm-pick-source-sources))
                                 :description)
                      "second")))))

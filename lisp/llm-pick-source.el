@@ -249,7 +249,19 @@ that category is left out."
 The service takes a bearer token; when none is configured the header is
 left out and the service decides, see `llm-pick-source-openrouter-api-key'."
   (let ((key (or llm-pick-source-openrouter-api-key
-                 (getenv "OPENROUTER_API_KEY"))))
+                 (getenv "OPENROUTER_API_KEY")
+                 (condition-case nil
+                     (let* ((entries (or (auth-source-search :host "openrouter.ai"
+                                                             :user "api-key"
+                                                             :require '(:secret))
+                                         (auth-source-search :host "openrouter.ai"
+                                                             :require '(:secret))))
+                            (secret (plist-get (car entries) :secret)))
+                       (when secret
+                         (if (functionp secret)
+                             (funcall secret)
+                           secret)))
+                   (error nil)))))
     (append (when key
               (list (cons "Authorization" (concat "Bearer " key))))
             '(("Accept" . "application/json")))))
@@ -298,6 +310,43 @@ category does not change the answer."
                                    :providers (list (cons 'openrouter id)))
                              (let ((prices (llm-pick-source--openrouter-prices model)))
                                (when prices (list :prices prices)))))))
+
+(llm-pick-source-register 'artificial-analysis :kind 'capability :description "Artificial Analysis intelligence, coding and agentic indexes via OpenRouter" :fetcher #'llm-pick-source--openrouter-benchmarks-loader)
+
+(defun llm-pick-source--openrouter-benchmarks-loader (options)
+  "Return entries from the OpenRouter benchmarks endpoint.
+
+These are the Artificial Analysis capability indices.  OPTIONS'
+:category selects which index becomes the entry's :score:
+\"intelligence\" -> intelligence_index, \"coding\" -> coding_index,
+\"agentic\" -> agentic_index.  When nil, emit one entry per index
+with the matching category."
+  (let* ((data (llm-pick-source--json-field
+                (llm-pick-fetch-get-json
+                 llm-pick-fetch-get--openrouter-benchmarks-url
+                 (llm-pick-source--openrouter-headers))
+                "data"))
+         (selected (plist-get options :category))
+         (indices '(("intelligence" . "intelligence_index")
+                    ("coding" . "coding_index")
+                    ("agentic" . "agentic_index")))
+         (wanted (if selected (list (assoc selected indices)) indices))
+         entries)
+    (unless (listp data)
+      (signal 'llm-pick-error '("OpenRouter benchmarks response has no \"data\" array")))
+    (dolist (item data)
+      (let ((slug (llm-pick-source--json-field item "model_permaslug")))
+        (when slug
+          (dolist (spec wanted)
+            (let ((value (llm-pick-source--json-field item (cdr spec))))
+              (when (numberp value)
+                (push (list :id slug
+                            :display-name (llm-pick-source--json-field item "display_name")
+                            :providers nil
+                            :score value
+                            :category (car spec))
+                      entries)))))))
+    (nreverse entries)))
 
 ;;; Built-in sources
 
