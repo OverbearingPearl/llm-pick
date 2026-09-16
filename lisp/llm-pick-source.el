@@ -235,6 +235,28 @@ leaderboard category via the category query parameter."
               "?category=" (url-hexify-string category))
     llm-pick-fetch-get--benchlm-url))
 
+(defvar llm-pick-source--benchlm-cache nil
+  "Short-lived in-process cache of the parsed plain leaderboard.
+
+The leaderboard endpoint answers with every category at once, so the
+per-category collector calls share one network fetch through this cache.
+It holds a cons cell (URL . (TIME . DATA)), where TIME is the
+floating-point time at which DATA was fetched; entries older than a few
+seconds are considered stale and refetched.")
+
+(defun llm-pick-source--benchlm-data ()
+  "Return the parsed plain leaderboard, caching it for 60 seconds."
+  (let ((url llm-pick-fetch-get--benchlm-url))
+    (if (and llm-pick-source--benchlm-cache
+             (equal (car llm-pick-source--benchlm-cache) url)
+             (< (float-time (time-subtract (current-time)
+                                           (cadr llm-pick-source--benchlm-cache)))
+                60))
+        (caddr llm-pick-source--benchlm-cache)
+      (let ((data (llm-pick-fetch-get-json url)))
+        (setq llm-pick-source--benchlm-cache (list url (current-time) data))
+        data))))
+
 (defun llm-pick-source--benchlm-id (model)
   "Return the ID of a parsed BenchLM MODEL.
 The leaderboard names a model by its display name and its creator rather
@@ -264,23 +286,52 @@ is the rule the snapshot loader follows as well."
 (defun llm-pick-source--benchlm-loader (options)
   "Return the entries of the BenchLM leaderboard.
 OPTIONS is the plist `llm-pick-source--collect-source' passes; its :category
-selects the score, see `llm-pick-fetch-get-http'.  A model without a score in
-that category is left out."
+selects the score, see `llm-pick-fetch-get-http'.  The endpoint answers with
+every category at once, so the fetch is shared across the collector's
+per-category calls.  When :category is non-nil, every model with a numeric
+score in that category is returned with :score/:category attached.  When
+:category is nil, every model with an ID is returned, with :score set to the
+best numeric score the model has across its categories and :category nil;
+\"overallScore\" is used only when the model has no numeric category score,
+and a model with no numeric score at all keeps no :score."
   (let* ((category (plist-get options :category))
-         (data (llm-pick-fetch-get-json (llm-pick-source--benchlm-url category)))
-         (models (llm-pick-source--json-field data "models")))
+         (data (llm-pick-source--benchlm-data))
+         (models (llm-pick-source--json-field data "models"))
+         (entries nil))
     (unless (listp models)
       (signal 'llm-pick-error
               (list "The BenchLM leaderboard has no \"models\" array")))
-    (cl-loop for model in models
-             for id = (llm-pick-source--benchlm-id model)
-             for score = (llm-pick-source--benchlm-score model category)
-             when (and id (numberp score))
-             collect (list :id id
-                           :display-name (or (llm-pick-source--json-field model "model")
-                                             id)
-                           :score score
-                           :category category))))
+    (dolist (model models)
+      (let ((id (llm-pick-source--benchlm-id model)))
+        (when id
+          (let ((display (or (llm-pick-source--json-field model "model")
+                             id)))
+            (if category
+                (let ((score (llm-pick-source--benchlm-score model category)))
+                  (when (numberp score)
+                    (push (list :id id
+                                :display-name display
+                                :score score
+                                :category category)
+                          entries)))
+              (let ((best (llm-pick-source--benchlm-score model nil)))
+                (cond
+                 ((numberp best)
+                  (push (list :id id
+                              :display-name display
+                              :score best
+                              :category nil)
+                        entries))
+                 ((numberp (llm-pick-source--json-field model "overallScore"))
+                  (push (list :id id
+                              :display-name display
+                              :score (llm-pick-source--json-field model "overallScore")
+                              :category nil)
+                        entries))
+                 (t
+                  (push (list :id id :display-name display)
+                        entries)))))))))
+    (nreverse entries)))
 
 (defun llm-pick-source--openrouter-headers ()
   "Return the request headers for the OpenRouter model list.
@@ -400,9 +451,10 @@ with the matching category."
                           :fetcher #'llm-pick-source--benchlm-loader)
 
 (llm-pick-source-register 'openrouter
-                          :kind 'price
-                          :description "List prices in USD per million tokens"
-                          :fetcher #'llm-pick-source--openrouter-loader)
+                          :kind 'both
+                          :description "List prices in USD per million tokens, plus the Artificial Analysis capability indices"
+                          :fetcher (list #'llm-pick-source--openrouter-loader
+                                         #'llm-pick-source--openrouter-benchmarks-loader))
 
 ;;; Collection
 

@@ -38,7 +38,8 @@
 
 (defconst llm-pick-test--reset-vars
   '(llm-pick-align--last-report
-    llm-pick-source-sources)
+    llm-pick-source-sources
+    llm-pick-source--benchlm-cache)
   "Variables that must not survive a reload.
 Only caches belong here.  Defcustoms are covered by
 `llm-pick-test--stale-option-p' and `llm-pick-test--user-options'; do

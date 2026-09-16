@@ -143,7 +143,7 @@ caches away first."
          ;; `llm-pick-collect' lives in `llm-pick.el', which requires this
          ;; module, so the view calls the collector underneath it instead of
          ;; making the dependency circular.
-         (setq llm-pick-view--records (llm-pick-source--collect))
+         (setq llm-pick-view--records (llm-pick-source--collect :category (list nil "agentic" "coding" "reasoning" "multimodalGrounded" "knowledge" "multilingual" "instructionFollowing" "math" "intelligence")))
          (llm-pick-view--save-cache llm-pick-view--records)
          llm-pick-view--records)))
 
@@ -161,42 +161,41 @@ This includes provider sources."
       (cl-pushnew (car pair) sources))
     (sort sources (lambda (a b) (string< (symbol-name a) (symbol-name b))))))
 
-(defun llm-pick-view--num (value)
-  "Return VALUE as a short cell, or a dash."
-  (if (numberp value) (format "%g" value) "-"))
+(defun llm-pick-view--num (value &optional width)
+  "Return VALUE as a short cell of WIDTH columns, or a dash."
+  (format (format "%%%ds" (or width 9))
+          (if (numberp value) (format "%g" value) "-")))
 
 (defun llm-pick-view--line (record)
   "Return one summary line for RECORD.
 Columns: model name, overall score, BenchLM category scores,
 Artificial Analysis scores, value, prices, and OpenRouter id."
-  (let* ((benchlm-categories
-          (sort (cl-loop for (key . _) in (plist-get record :scores)
-                         when (and (consp key) (eq (car key) 'benchlm))
-                         collect (cdr key))
-                #'string<))
+  (let* ((benchlm-categories '("agentic" "coding" "reasoning" "multimodalGrounded"
+                               "knowledge" "multilingual" "instructionFollowing" "math"))
          (aa-categories '("intelligence" "coding" "agentic"))
          (cells (append
                  (list (format "%-44s"
                                (or (plist-get record :display-name)
                                    (llm-pick-core--field record 'name))))
-                 (list (llm-pick-view--num (llm-pick-core--field record 'score)))
+                 (list (llm-pick-view--num (llm-pick-core--field record 'score) 9))
                  (mapcar
                   (lambda (cat)
-                    (llm-pick-view--num
-                     (llm-pick-core--score record 'benchlm cat)))
+                    (llm-pick-view--num (llm-pick-core--score record 'benchlm cat) 9))
                   benchlm-categories)
                  (mapcar
                   (lambda (cat)
-                    (llm-pick-view--num
-                     (llm-pick-core--score record 'openrouter cat)))
+                    (llm-pick-view--num (llm-pick-core--score record 'openrouter cat) 9))
                   aa-categories)
-                 (list (llm-pick-view--num (llm-pick-core--field record 'value)))
-                 (list (llm-pick-view--num (llm-pick-core--field record 'bm-in))
-                       (llm-pick-view--num (llm-pick-core--field record 'bm-out)))
-                 (list (llm-pick-view--num (llm-pick-core--field record 'or-in))
-                       (llm-pick-view--num (llm-pick-core--field record 'or-out)))
-                 (list (or (cdr (assq 'openrouter (plist-get record :providers)))
-                           "-")))))
+                 (list (llm-pick-view--num (llm-pick-core--field record 'value) 9))
+                 (list (concat (llm-pick-view--num (llm-pick-core--field record 'bm-in) 6)
+                               " "
+                               (llm-pick-view--num (llm-pick-core--field record 'bm-out) 7)))
+                 (list (concat (llm-pick-view--num (llm-pick-core--field record 'or-in) 6)
+                               " "
+                               (llm-pick-view--num (llm-pick-core--field record 'or-out) 7)))
+                 (list (format "%24s"
+                               (or (cdr (assq 'openrouter (plist-get record :providers)))
+                                   "-"))))))
     (mapconcat #'identity cells "  ")))
 
 ;;; Rendering primitives
