@@ -85,15 +85,30 @@ Signal `llm-pick-error' when there is no status line."
                 (list (format "%s answered with no status line" url))))
       (string-to-number (match-string 1)))))
 
+(defcustom llm-pick-fetch-get-debug nil
+  "When non-nil, log every HTTP response to the *llm-pick-debug* buffer.
+Each entry includes the URL and a truncated prefix of the body so raw
+API output can be inspected without dumping the whole payload."
+  :type 'boolean
+  :group 'llm-pick)
+
 (defun llm-pick-fetch-get--body (buffer url)
-  "Return the body of the response in BUFFER, from URL."
+  "Extract the response body from BUFFER fetched from URL.
+When `llm-pick-fetch-get-debug' is non-nil, log the URL and a
+truncated prefix of the body to the *llm-pick-debug* buffer."
   (with-current-buffer buffer
-    (save-excursion
-      (goto-char (point-min))
-      (unless (search-forward "\n\n" nil t)
-        (signal 'llm-pick-error
-                (list (format "%s answered with no body" url))))
-      (buffer-substring-no-properties (point) (point-max)))))
+    (goto-char (point-min))
+    (let ((body (if (search-forward "\n\n" nil t)
+                    (buffer-substring-no-properties (point) (point-max))
+                  (signal 'llm-pick-error
+                          (list (format "%s answered with no body" url))))))
+      (when llm-pick-fetch-get-debug
+        (with-current-buffer (get-buffer-create "*llm-pick-debug*")
+          (goto-char (point-max))
+          (insert (format "\nGET %s\nbody length: %d\n%s\n"
+                          url (length body)
+                          (substring body 0 (min (length body) 2000))))))
+      body)))
 
 (defun llm-pick-fetch-get-http (url &optional headers)
   "Return the body of URL as a string, one GET per call.
