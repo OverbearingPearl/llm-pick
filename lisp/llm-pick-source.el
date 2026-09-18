@@ -152,15 +152,17 @@ is the rule the snapshot loader follows as well."
 OPTIONS is the plist `llm-pick-source--collect-source' passes; its :category
 selects the score, see `llm-pick-fetch-get-http'.  The endpoint answers with
 every category at once, so the fetch is shared across the collector's
-per-category calls.  The top-level numeric fields \"inputPrice\" and
-\"outputPrice\" hold per-million-token prices; when at least one of them is
-a non-negative number, the entry gets a :prices (list :in IN :out OUT)
-attached.  When :category is non-nil, every model with a numeric score in
-that category is returned with :score/:category attached.  When :category is
-nil, every model with an ID is returned, with :score set to the best numeric
-score the model has across its categories and :category nil; \"overallScore\"
-is used only when the model has no numeric category score, and a model with
-no numeric score at all keeps no :score."
+per-category calls.  The top-level numeric fields \"inputPrice\",
+\"outputPrice\", and \"cachedInputPrice\" hold per-million-token prices; when
+at least one of them is a non-negative number, the entry gets a :prices
+\& IN :out OUT :cache CACHE) attached, where each half is the field
+value when it is a non-negative number and nil otherwise.  When :category is
+non-nil, every model with a numeric score in that category is returned with
+:score/:category attached.  When :category is nil, every model with an ID is
+returned, with :score set to the best numeric score the model has across its
+categories and :category nil; \"overallScore\" is used only when the model has
+no numeric category score, and a model with no numeric score at all keeps no
+:score."
   (let* ((category (plist-get options :category))
          (data (llm-pick-source--benchlm-data))
          (models (llm-pick-source--json-field data "models"))
@@ -175,15 +177,20 @@ no numeric score at all keeps no :score."
                              id))
                 (in-price (llm-pick-source--json-field model "inputPrice"))
                 (out-price (llm-pick-source--json-field model "outputPrice"))
+                (cache-price (llm-pick-source--json-field model "cachedInputPrice"))
                 prices)
             (when (or (and (numberp in-price) (>= in-price 0))
-                      (and (numberp out-price) (>= out-price 0)))
+                      (and (numberp out-price) (>= out-price 0))
+                      (and (numberp cache-price) (>= cache-price 0)))
               (setq prices (list :prices (list :in (and (numberp in-price)
                                                         (>= in-price 0)
                                                         in-price)
                                                :out (and (numberp out-price)
                                                          (>= out-price 0)
-                                                         out-price)))))
+                                                         out-price)
+                                               :cache (and (numberp cache-price)
+                                                           (>= cache-price 0)
+                                                           cache-price)))))
             (if category
                 (let ((score (llm-pick-source--benchlm-score model category)))
                   (when (numberp score)
@@ -249,13 +256,39 @@ pseudo-models, is reported as missing.  Nil when KEY is absent."
              (scaled (/ (round (* per-token 1e12)) 1e6)))
         (and (>= scaled 0) scaled)))))
 
+(defun llm-pick-source--openrouter-price-override (pricing)
+  "Return the override entry in PRICING covering the current UTC time, or nil.
+PRICING is a parsed JSON hash table; the \"overrides\" field is looked
+up via `llm-pick-source--json-field', as are each entry's
+\"utc_start\" and \"utc_end\" fields."
+  (let* ((now (decode-time (current-time) t))
+         (now-hm (+ (* (nth 2 now) 100) (nth 1 now)))
+         (overrides (llm-pick-source--json-field pricing "overrides")))
+    (when (listp overrides)
+      (seq-find
+       (lambda (ov)
+         (let ((start (llm-pick-source--json-field ov "utc_start"))
+               (end (llm-pick-source--json-field ov "utc_end")))
+           (when (and (numberp start) (numberp end))
+             (if (> start end)
+                 (or (>= now-hm start) (< now-hm end))
+               (and (>= now-hm start) (< now-hm (if (zerop end) 2400 end)))))))
+       overrides))))
+
 (defun llm-pick-source--openrouter-prices (model)
-  "Return the per million token prices of a parsed OpenRouter MODEL, or nil."
+  "Return the per million token prices of a parsed OpenRouter MODEL, or nil.
+Prices are read from the active time-of-day override (see
+`llm-pick-source--openrouter-price-override'), falling back to the base
+pricing object when no override applies.  Includes the cache-hit
+input price; :cache is nil when the provider does not quote one."
   (let* ((pricing (llm-pick-source--json-field model "pricing"))
-         (in (llm-pick-source--openrouter-price pricing "prompt"))
-         (out (llm-pick-source--openrouter-price pricing "completion")))
+         (active (or (llm-pick-source--openrouter-price-override pricing)
+                     pricing))
+         (in (llm-pick-source--openrouter-price active "prompt"))
+         (out (llm-pick-source--openrouter-price active "completion"))
+         (cache (llm-pick-source--openrouter-price active "input_cache_read")))
     (when (or (numberp in) (numberp out))
-      (list :in in :out out))))
+      (list :in in :out out :cache cache))))
 
 (defun llm-pick-source--openrouter-loader (_options)
   "Return the entries of the OpenRouter model list.

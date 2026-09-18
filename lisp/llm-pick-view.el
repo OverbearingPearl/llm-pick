@@ -40,7 +40,7 @@
 (require 'llm-pick-render-report)
 
 (defgroup llm-pick-view nil
-  "Interactive views of llm-pick."
+  "Interactive views of `llm-pick'."
   :group 'llm-pick
   :prefix "llm-pick-view-")
 
@@ -59,9 +59,13 @@
   "Face used to distinguish the column legend from the entries."
   :group 'llm-pick-view)
 
-(defcustom llm-pick-view-cache-ttl 86400
+(defcustom llm-pick-view-cache-ttl 3600
   "Seconds a collected set of records stays fresh on disk.
-86400 is one day: within it, opening a view downloads nothing."
+OpenRouter time-of-day overrides change a model's price every hour
+\&, so one hour is the longest a cached record set can be
+trusted.
+3600 is one hour: within it, opening a view downloads nothing; past
+it, the prices may belong to a different UTC override window."
   :type 'number)
 
 (defcustom llm-pick-view-cache-dir
@@ -170,18 +174,19 @@ This includes provider sources."
   "Return one summary line for RECORD.
 Columns: model name, overall score, one BenchLM cell joining the 8
 category scores with '/', one OpenRouter cell joining the 3 Artificial
-Analysis scores with '/', one price cell per source joining in
-and out with '/', and the OpenRouter id.
+Analysis scores with '/', one price cell per source joining the 3
+price halves in, cached-in and out with '/' (e.g.
+\"123.000/89.000/123.000\"), and the OpenRouter id.
 Category scores render as exactly 3-character integers (%3.0f,
 missing as \"---\"), joined with '/' with no padding, so the BenchLM
 cell is 8*3+7=31 characters and the OpenRouter cell is 3*3+2=11
 characters.  Price halves render as %7.3f (width 7); a nil price or
 a 0 price from a non-openrouter source renders as \" --.---\" (the
 zero/unknown marker), an openrouter 0 renders as \"  0.000\".  The
-in and out halves are joined with '/' into a 15-character cell.  The
-price cells are for the default price source, named by the variable
-llm-pick-core-default-price-source, followed by the secondary price
-source, named by the variable
+in, cached-in and out halves are joined with '/' into a 23-character
+cell.  The price cells are for the default price source, named by the
+variable llm-pick-core-default-price-source, followed by the
+secondary price source, named by the variable
 llm-pick-core-secondary-price-source.  Both names are resolved
 dynamically here since those variables live in llm-pick.el.  The
 name, score and id columns keep their fixed widths (the name
@@ -206,15 +211,19 @@ still line up with the header from llm-pick-view--insert-columns."
                         (t
                          (format "%7.3f" price)))))
          (join (lambda (parts) (mapconcat #'identity parts "/")))
-         (price-pair (lambda (source)
-                       (concat
-                        (funcall price-cell
-                                 (llm-pick-core--price record source 'in)
-                                 source)
-                        "/"
-                        (funcall price-cell
-                                 (llm-pick-core--price record source 'out)
-                                 source))))
+         (price-triple (lambda (source)
+                         (concat
+                          (funcall price-cell
+                                   (llm-pick-core--price record source 'in)
+                                   source)
+                          "/"
+                          (funcall price-cell
+                                   (llm-pick-core--price record source 'cache)
+                                   source)
+                          "/"
+                          (funcall price-cell
+                                   (llm-pick-core--price record source 'out)
+                                   source))))
          (name (truncate-string-to-width
                 (or (plist-get record :display-name)
                     (llm-pick-core--field record 'name))
@@ -233,8 +242,8 @@ still line up with the header from llm-pick-view--insert-columns."
                                  (lambda (cat)
                                    (funcall bare-num (llm-pick-core--score record 'openrouter cat)))
                                  aa-categories)))
-                 (list (funcall price-pair default-price))
-                 (list (funcall price-pair secondary-price))
+                 (list (funcall price-triple default-price))
+                 (list (funcall price-triple secondary-price))
                  (list (format "%-24s"
                                (or (cdr (assq 'openrouter (plist-get record :providers)))
                                    "-"))))))
@@ -258,13 +267,15 @@ Category abbreviations in the header cells:
   OpenRouter (OR): In = Intelligence, Co = Coding, Ag = Agentic.
 
 Each score value is a fixed 3-character integer; missing values are
-shown as \"---\".
+shown as \"---\".  Each price cell is a joined in/cache/out triple of
+fixed 7-character components (23 chars total, 2 separator spaces);
+missing values are shown as \"---\".
 
 Column widths match those used by `llm-pick-view--line' so the header
 aligns with the data rows: name %-54s (matching
 `llm-pick-view--line''s truncation of display names to 54 characters),
 score %9s, BenchLM joined cell 31 chars, OR joined cell 11 chars, each
-price cell 15 chars, and the OpenRouter id left-aligned in %-24s."
+price cell 23 chars, and the OpenRouter id left-aligned in %-24s."
   (let* ((head (concat (format "%-54s  %9s" "Model" "Score")))
          ;; The joined score cells aggregate category scores; list the
          ;; abbreviations so the compact columns are interpretable:
@@ -272,12 +283,13 @@ price cell 15 chars, and the OpenRouter id left-aligned in %-24s."
          ;; scores have 3 (3*3+2=11 chars).  The full names exceed the
          ;; cell width, so the compact form is used; see the docstring
          ;; for the mapping.  Each score value is a fixed 3-character
-         ;; integer (missing as "---").
+         ;; integer (missing as "---").  Each price cell joins three
+         ;; fixed 7-character in/cache/out values (3*7+2=23 chars).
          (head (concat head "  " (format "%-31s"
                                          "BenchLM Ag Co Re Mm Kn Ml IF Ma")))
          (head (concat head "  " (format "%-11s" "OR In Co Ag")))
-         (head (concat head "  " (format "%-15s" "BenchLM $/M")))
-         (head (concat head "  " (format "%-15s" "OpenRT $/M")))
+         (head (concat head "  " (format "%-23s" "BenchLM $/M in/ca/out")))
+         (head (concat head "  " (format "%-23s" "OpenRT $/M in/ca/out")))
          (head (concat head "  " (format "%-24s" "OpenRouter id")))
          (start (point)))
     (insert (propertize head 'face 'llm-pick-view-column-face) "\n")
@@ -383,7 +395,7 @@ BODY is a function inserting the buffer content."
   "Record the view returns to with `q', when it is not the parent.")
 
 (define-derived-mode llm-pick-view-mode special-mode "llm-pick-view"
-  "Major mode of the llm-pick main, model and compare views."
+  "Major mode of the `llm-pick' main, model and compare views."
   (setq-local truncate-lines t))
 
 ;;; Main view

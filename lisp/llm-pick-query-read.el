@@ -81,7 +81,7 @@ stored.")
 (defun llm-pick-query-read-values (key)
   "Return the values the query word for KEY suggests, or nil.
 The values are static suggestions: for :category, for example, the
-list is the categories llm-pick knows about.  Completion offers them
+list is the categories `llm-pick' knows about.  Completion offers them
 as examples and never restricts what is read: a value not in the list
 is read all the same, so a category a source carries still works even
 when it is not suggested.  Numeric words like :budget and

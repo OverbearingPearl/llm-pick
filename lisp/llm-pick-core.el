@@ -261,10 +261,12 @@ A record collected for several categories keys its scores by
                  return value))))
 
 (defun llm-pick-core--direction-key (direction)
-  "Return the key under which the price of DIRECTION is kept in a price plist."
+  "Return the key under which the price of DIRECTION is kept in a price plist.
+DIRECTION is `in', `out' or `cache'."
   (pcase direction
     ('in :in)
     ('out :out)
+    ('cache :cache)
     (_ (error "Unknown price direction: %S" direction))))
 
 (defun llm-pick-core--price (m source direction)

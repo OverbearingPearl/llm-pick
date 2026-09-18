@@ -419,7 +419,7 @@ anchor first: a list of plists with :source, :id, :norm, :canonical,
 when the ID normalizes to the anchor's model, `fuzzy' when a
 similarity score matched it, `agreed' when several sources spelled it
 alike and `unmatched' when nothing matched.  The renderer prints that
-list, so that a reader can check every decision llm-pick made instead
+list, so that a reader can check every decision `llm-pick' made instead
 of only the ones that failed.
 
 Signal `llm-pick-align-conflict' for an anchor source that maps two

@@ -325,7 +325,9 @@ ARGS is the plist the report was called with; its category,
   (setq-local truncate-lines nil))
 
 (defun llm-pick--report-display (text &optional buffer-name)
-  "Show TEXT in the BUFFER-NAME, `*llm-pick*' by default, and return TEXT."
+  "Show TEXT in the buffer named BUFFER-NAME, or the report buffer.
+Return TEXT.
+The report buffer is named *llm-pick*."
   (let ((buffer (get-buffer-create (or buffer-name "*llm-pick*"))))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
@@ -338,7 +340,7 @@ ARGS is the plist the report was called with; its category,
 
 ;;;###autoload
 (defun llm-pick-report (&rest args)
-  "Show the models the arguments ask for in the `*llm-pick*' buffer.
+  "Show the models the arguments ask for in the *llm-pick* buffer.
 Return the text of the report.
 
 ARGS is a plist of three groups:
