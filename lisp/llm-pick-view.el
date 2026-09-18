@@ -169,8 +169,15 @@ This includes provider sources."
 (defun llm-pick-view--line (record)
   "Return one summary line for RECORD.
 Columns: model name, overall score, BenchLM category scores,
-Artificial Analysis scores, value, prices, and OpenRouter id."
-  (let* ((benchlm-categories '("agentic" "coding" "reasoning" "multimodalGrounded"
+Artificial Analysis scores, value, prices, and OpenRouter id.
+The two price columns are, in order: the default price source,
+named by the variable llm-pick-core-default-price-source, and
+the secondary price source, named by the variable
+llm-pick-core-secondary-price-source.  Both names are resolved
+dynamically here since those variables live in llm-pick.el."
+  (let* ((default-price (symbol-value 'llm-pick-core-default-price-source))
+         (secondary-price (symbol-value 'llm-pick-core-secondary-price-source))
+         (benchlm-categories '("agentic" "coding" "reasoning" "multimodalGrounded"
                                "knowledge" "multilingual" "instructionFollowing" "math"))
          (aa-categories '("intelligence" "coding" "agentic"))
          (cells (append
@@ -187,12 +194,12 @@ Artificial Analysis scores, value, prices, and OpenRouter id."
                     (llm-pick-view--num (llm-pick-core--score record 'openrouter cat) 9))
                   aa-categories)
                  (list (llm-pick-view--num (llm-pick-core--field record 'value) 9))
-                 (list (concat (llm-pick-view--num (llm-pick-core--field record 'bm-in) 6)
+                 (list (concat (llm-pick-view--num (llm-pick-core--price record default-price 'in) 6)
                                " "
-                               (llm-pick-view--num (llm-pick-core--field record 'bm-out) 7)))
-                 (list (concat (llm-pick-view--num (llm-pick-core--field record 'or-in) 6)
+                               (llm-pick-view--num (llm-pick-core--price record default-price 'out) 7)))
+                 (list (concat (llm-pick-view--num (llm-pick-core--price record secondary-price 'in) 6)
                                " "
-                               (llm-pick-view--num (llm-pick-core--field record 'or-out) 7)))
+                               (llm-pick-view--num (llm-pick-core--price record secondary-price 'out) 7)))
                  (list (format "%24s"
                                (or (cdr (assq 'openrouter (plist-get record :providers)))
                                    "-"))))))
@@ -208,16 +215,26 @@ Artificial Analysis scores, value, prices, and OpenRouter id."
     (put-text-property start (point) 'llm-pick-header t)))
 
 (defun llm-pick-view--insert-columns (&optional _columns)
-  "Insert the column header line with `llm-pick-view-column-face'."
+  "Insert the column header line with `llm-pick-view-column-face'.
+The In/Out column labels follow `llm-pick-core-default-price-source'
+and `llm-pick-core-secondary-price-source'."
   (let* ((benchlm-cats '("Agentic" "Coding" "Reasoning" "Multimodal"
                          "Knowledge" "Multiling" "Instr-F" "Math"))
          (aa-cats '("OR-Int" "OR-Code" "OR-Agnt"))
+         (default-label (upcase
+                         (if (boundp 'llm-pick-core-default-price-source)
+                             (symbol-name llm-pick-core-default-price-source)
+                           "bl")))
+         (secondary-label (upcase
+                           (if (boundp 'llm-pick-core-secondary-price-source)
+                               (symbol-name llm-pick-core-secondary-price-source)
+                             "openrouter")))
          (head (concat (format "%-44s  %9s" "Model" "Score")))
          (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) benchlm-cats "  ")))
          (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) aa-cats "  ")))
          (head (concat head "  " (format "%9s" "Value")))
-         (head (concat head "  " (format "%14s" "In/Out (BL)")))
-         (head (concat head "  " (format "%14s" "In/Out (OR)")))
+         (head (concat head "  " (format "%14s" (format "In/Out (%s)" default-label))))
+         (head (concat head "  " (format "%14s" (format "In/Out (%s)" secondary-label))))
          (head (concat head "  " (format "%24s" "OpenRouter id")))
          (start (point)))
     (insert (propertize head 'face 'llm-pick-view-column-face) "\n")

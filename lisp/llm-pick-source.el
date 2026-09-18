@@ -152,12 +152,15 @@ is the rule the snapshot loader follows as well."
 OPTIONS is the plist `llm-pick-source--collect-source' passes; its :category
 selects the score, see `llm-pick-fetch-get-http'.  The endpoint answers with
 every category at once, so the fetch is shared across the collector's
-per-category calls.  When :category is non-nil, every model with a numeric
-score in that category is returned with :score/:category attached.  When
-:category is nil, every model with an ID is returned, with :score set to the
-best numeric score the model has across its categories and :category nil;
-\"overallScore\" is used only when the model has no numeric category score,
-and a model with no numeric score at all keeps no :score."
+per-category calls.  The top-level numeric fields \"inputPrice\" and
+\"outputPrice\" hold per-million-token prices; when at least one of them is
+a non-negative number, the entry gets a :prices (list :in IN :out OUT)
+attached.  When :category is non-nil, every model with a numeric score in
+that category is returned with :score/:category attached.  When :category is
+nil, every model with an ID is returned, with :score set to the best numeric
+score the model has across its categories and :category nil; \"overallScore\"
+is used only when the model has no numeric category score, and a model with
+no numeric score at all keeps no :score."
   (let* ((category (plist-get options :category))
          (data (llm-pick-source--benchlm-data))
          (models (llm-pick-source--json-field data "models"))
@@ -169,31 +172,45 @@ and a model with no numeric score at all keeps no :score."
       (let ((id (llm-pick-source--benchlm-id model)))
         (when id
           (let ((display (or (llm-pick-source--json-field model "model")
-                             id)))
+                             id))
+                (in-price (llm-pick-source--json-field model "inputPrice"))
+                (out-price (llm-pick-source--json-field model "outputPrice"))
+                prices)
+            (when (or (and (numberp in-price) (>= in-price 0))
+                      (and (numberp out-price) (>= out-price 0)))
+              (setq prices (list :prices (list :in (and (numberp in-price)
+                                                        (>= in-price 0)
+                                                        in-price)
+                                               :out (and (numberp out-price)
+                                                         (>= out-price 0)
+                                                         out-price)))))
             (if category
                 (let ((score (llm-pick-source--benchlm-score model category)))
                   (when (numberp score)
-                    (push (list :id id
-                                :display-name display
-                                :score score
-                                :category category)
+                    (push (append (list :id id
+                                        :display-name display
+                                        :score score
+                                        :category category)
+                                  prices)
                           entries)))
               (let ((best (llm-pick-source--benchlm-score model nil)))
                 (cond
                  ((numberp best)
-                  (push (list :id id
-                              :display-name display
-                              :score best
-                              :category nil)
+                  (push (append (list :id id
+                                      :display-name display
+                                      :score best
+                                      :category nil)
+                                prices)
                         entries))
                  ((numberp (llm-pick-source--json-field model "overallScore"))
-                  (push (list :id id
-                              :display-name display
-                              :score (llm-pick-source--json-field model "overallScore")
-                              :category nil)
+                  (push (append (list :id id
+                                      :display-name display
+                                      :score (llm-pick-source--json-field model "overallScore")
+                                      :category nil)
+                                prices)
                         entries))
                  (t
-                  (push (list :id id :display-name display)
+                  (push (append (list :id id :display-name display) prices)
                         entries)))))))))
     (nreverse entries)))
 

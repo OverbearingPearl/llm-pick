@@ -124,17 +124,20 @@ endpoint keeps working."
   "Source used by the `score' shorthand and the `score' predicate."
   :type 'symbol)
 
-(defcustom llm-pick-core-default-price-source 'openrouter
-  "Source used by the `or-in' and `or-out' shorthands and predicates."
+(defcustom llm-pick-core-default-price-source 'benchlm
+  "Default price source used by the `in'/`out' price shorthands and predicates.
+The other source, `openrouter', is pointed at by
+`llm-pick-core-secondary-price-source'."
   :type 'symbol)
 
-(defcustom llm-pick-core-secondary-price-source nil
+(defcustom llm-pick-core-secondary-price-source 'openrouter
   "Second price source the `bm-in', `bm-out' and `gap' fields read.
 The `gap' field is the relative difference between this source and
 `llm-pick-core-default-price-source', so it says which channel is cheaper.
-Nothing is registered under this name by default, so the three fields
-answer nil until you register a second price source and point this
-option at it; see the Sources section of README.md."
+Defaults to `openrouter', whose OpenRouter prices are read by the `bm-in',
+`bm-out' and `gap' fields out of the box; only change this option when
+you register a different second price source; see the Sources section
+of README.md."
   :type '(choice (const :tag "None" nil) symbol))
 
 (defcustom llm-pick-render-report-marginal-threshold 2.0
