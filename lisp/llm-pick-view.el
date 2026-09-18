@@ -91,11 +91,13 @@ Buffer-local state is derived from this; a refresh replaces it.")
 (defvar-local llm-pick-view--baseline nil
   "The record a model or compare view is built around.")
 
-(defvar-local llm-pick-view--filter nil
-  "Predicate a main view keeps its models with, or nil.")
-
 (defvar-local llm-pick-view--order nil
   "Field a main view sorts its models by, or nil for the canonical ID.")
+
+(defvar llm-pick-view--reverse nil
+  "Non-nil when the main view sorts in the flipped direction.
+Numeric columns default to descending and the name column to
+ascending; repeating the same sort key toggles this.")
 
 ;;; Collection cache
 
@@ -275,7 +277,9 @@ Column widths match those used by `llm-pick-view--line' so the header
 aligns with the data rows: name %-48s (matching
 `llm-pick-view--line''s truncation of display names to 50 characters),
 score %9s, BenchLM joined cell 31 chars, OR joined cell 11 chars, each
-price cell 23 chars, and the OpenRouter id left-aligned in %-24s."
+price cell 23 chars, and the OpenRouter id left-aligned in %-24s.
+Sorting: one key per column (see `llm-pick-view-mode-map'); repeating
+the same key flips the direction."
   (let* ((head (concat (format "%-48s  %9s" "Model" "Score")))
          ;; The joined score cells aggregate category scores; list the
          ;; abbreviations so the compact columns are interpretable:
@@ -292,7 +296,8 @@ price cell 23 chars, and the OpenRouter id left-aligned in %-24s."
          (head (concat head "  " (format "%-23s" "OpenRT $/M in/ca/out")))
          (head (concat head "  " (format "%-24s" "OpenRouter id")))
          (start (point)))
-    (insert (propertize head 'face 'llm-pick-view-column-face) "\n")
+    (insert (propertize head
+                        'face 'llm-pick-view-column-face) "\n")
     (put-text-property start (point) 'llm-pick-header t)))
 
 (defun llm-pick-view--insert-entry (record)
@@ -316,19 +321,65 @@ BODY is a function inserting the buffer content."
     (funcall body)
     (goto-char (point-min))
     (setq llm-pick-view--kind kind
-          header-line-format (llm-pick-view--header-line kind))
+          header-line-format (llm-pick-view--header-line))
     (setq buffer-read-only t)))
 
-(defun llm-pick-view--header-line (kind)
-  "Return the key hint for the header line of a view of KIND."
-  (concat "llm-pick "
-          (pcase kind
-            ('main
-             "[n/p j/k entry] [f/b section] [RET model] [s price | S score] [F filter] [g refresh] [q quit]")
-            ('model
-             "[n/p j/k entry] [f/b section] [RET model] [c compare] [q back]")
-            ('compare
-             "[n/p j/k entry] [f/b section] [RET model] [d side-by-side diff] [q model view of point]"))))
+(defun llm-pick-view--header-line ()
+  "Return the key hint for the header line of the main view."
+  (let* ((word-hint
+          (lambda (word)
+            ;; Render a word like "[N]ame" or "Multi[m]odal": characters
+            ;; wrapped in square brackets are displayed in bold with
+            ;; underline (keeping their original case), the rest with the
+            ;; default face.
+            (let ((pos 0)
+                  (parts nil))
+              (while (< pos (length word))
+                (if (eq (aref word pos) ?\[)
+                    (let ((close (string-search "]" word pos)))
+                      (if close
+                          (progn
+                            (push (propertize (substring word (1+ pos) close)
+                                              'face '(:underline t
+                                                      :weight bold))
+                                  parts)
+                            (setq pos (1+ close)))
+                        (push (substring word pos) parts)
+                        (setq pos (length word))))
+                  (let ((next (string-search "[" word pos)))
+                    (push (substring word pos (or next (length word))) parts)
+                    (setq pos (or next (length word))))))
+              (string-join (nreverse parts)))))
+         (group-words
+          (list
+           ;; Score
+           (list "[S]core")
+           ;; BenchLM capability keys
+           (list "[A]gentic" "[C]oding" "[R]easoning" "Multi[m]odal"
+                 "[K]nowledge" "Multi[l]ing" "In[s]tructionF" "M[a]th")
+           ;; OpenRouter capability keys
+           (list "Intell[i]gence" "C[o]ding" "Ag[e]ntic")
+           ;; BenchLM price keys
+           (list "[I]nput" "Ca[c]he" "[O]utput")
+           ;; OpenRouter price keys
+           (list "Inp[u]t" "Cac[h]e" "Outpu[t]")))
+         (word-sep "/")
+         (group-sep "  ")
+         (plain-groups
+          (concat "n/p/j/k (move)" group-sep "f/b (section)"))
+         (sort-hint
+          (concat
+           plain-groups
+           group-sep
+           (string-join
+            (mapcar
+             (lambda (words)
+               (string-join
+                (mapcar (lambda (w) (funcall word-hint w)) words)
+                word-sep))
+             group-words)
+            group-sep))))
+    sort-hint))
 
 ;;; Movement
 
@@ -382,12 +433,33 @@ BODY is a function inserting the buffer content."
     (define-key map (kbd "RET") 'llm-pick-view-ret)
     (define-key map "q" 'llm-pick-view-quit)
     (define-key map "g" 'llm-pick-view-refresh)
-    (define-key map "s" 'llm-pick-view-sort-price)
-    (define-key map "S" 'llm-pick-view-sort-score)
-    
-    (define-key map "F" 'llm-pick-view-filter)
-    (define-key map "c" 'llm-pick-view-compare-here)
-    (define-key map "d" 'llm-pick-view-diff-here)
+    ;; One key per sortable column; a repeat of the same key flips
+    ;; the direction (see `llm-pick-view-sort-toggle').
+    ;; N = name, S = overall score, A/C/R/m/K/l/s/a = BenchLM category,
+    ;; i/o/e = OpenRouter category, I/c/O = BenchLM prices,
+    ;; u/h/t = OpenRouter prices.
+    (dolist (spec '(("N" . name)
+                    ("S" . score)
+                    ("A" . (benchlm . "agentic"))
+                    ("C" . (benchlm . "coding"))
+                    ("R" . (benchlm . "reasoning"))
+                    ("m" . (benchlm . "multimodalGrounded"))
+                    ("K" . (benchlm . "knowledge"))
+                    ("l" . (benchlm . "multilingual"))
+                    ("s" . (benchlm . "instructionFollowing"))
+                    ("a" . (benchlm . "math"))
+                    ("i" . (openrouter . "intelligence"))
+                    ("o" . (openrouter . "coding"))
+                    ("e" . (openrouter . "agentic"))
+                    ("I" . (benchlm . in))
+                    ("c" . (benchlm . cache))
+                    ("O" . (benchlm . out))
+                    ("u" . (openrouter . in))
+                    ("h" . (openrouter . cache))
+                    ("t" . (openrouter . out))))
+      (define-key map (car spec)
+                  (lambda () (interactive)
+                    (llm-pick-view-sort-toggle (cdr spec)))))
     map)
   "Keymap of `llm-pick-view-mode'.")
 
@@ -401,16 +473,82 @@ BODY is a function inserting the buffer content."
 ;;; Main view
 
 (defun llm-pick-view--sort (records)
-  "Return RECORDS in the order of the main view."
-  (if (null llm-pick-view--order)
-      (sort (copy-sequence records)
-            (lambda (a b)
-              (string< (llm-pick-core--field a 'name)
-                       (llm-pick-core--field b 'name))))
-    (sort (copy-sequence records)
-          (lambda (a b)
-            (> (or (llm-pick-core--field a llm-pick-view--order) -1)
-               (or (llm-pick-core--field b llm-pick-view--order) -1))))))
+  "Return RECORDS in the order of the main view.
+Numeric columns sort strongest first and the name column ascending;
+`llm-pick-view--reverse', set by repeating the same sort key,
+flips the direction.  Missing numeric keys rank last either way.
+Keys are normalized before comparison: the name branch coerces to
+strings and the numeric branch coerces to numbers (missing keys
+become \"\" / -1), avoiding mixed-type comparison errors."
+  (sort (copy-sequence records)
+        (lambda (a b)
+          (let* ((rawa (llm-pick-view--sort-key a))
+                 (rawb (llm-pick-view--sort-key b))
+                 (name-p (or (null llm-pick-view--order)
+                             (eq llm-pick-view--order 'name)))
+                 (ka (if name-p
+                         (if (stringp rawa) rawa (format "%s" (or rawa "")))
+                       (if (numberp rawa) rawa -1)))
+                 (kb (if name-p
+                         (if (stringp rawb) rawb (format "%s" (or rawb "")))
+                       (if (numberp rawb) rawb -1)))
+                 (less (if name-p
+                           (string< ka kb)
+                         (> ka kb))))
+            (if llm-pick-view--reverse (not less) less)))))
+
+(defun llm-pick-view--key-face ()
+  "Face for key hints: red, underlined, and bold."
+  (let ((face (make-face 'llm-pick-view-key-face)))
+    (set-face-foreground face "red")
+    (set-face-underline face t)
+    (set-face-bold face t)
+    face))
+
+(defun llm-pick-view--key-hint (prefix key suffix)
+  "Concatenate PREFIX, KEY, and SUFFIX into a hint fragment.
+KEY is given the keybinding face."  (concat prefix
+          (propertize key 'face (llm-pick-view--key-face))
+          suffix))
+
+(defun llm-pick-view--sort-key (record)
+  "Return the sort key of RECORD for the current `llm-pick-view--order'.
+The order value is either a plain field symbol or a cons cell.
+For a category score column (SOURCE . CATEGORY) the key is the
+result of `llm-pick-core--score'; for a price column (SOURCE .
+PART) where PART is `in', `cache' or `out' the key is the result
+of `llm-pick-core--price'.  The `name' order and the nil order
+read the display name via `llm-pick-core--field'.  A nil or
+`unknown' key is treated as the worst possible value: -1 for
+numeric keys and \"\" for name keys."
+  (let ((order llm-pick-view--order)
+        key)
+    (cond
+     ((or (not order) (eq order 'name))
+      (setq key (llm-pick-core--field record 'name)))
+     ((symbolp order)
+      (setq key (llm-pick-core--field record order)))
+     ((and (consp order)
+           (memq (cdr order) '(in cache out)))
+      (setq key (llm-pick-core--price record
+                                      (car order) (cdr order))))
+     ((consp order)
+      (setq key (llm-pick-core--score record
+                                      (car order) (cdr order)))))
+    (if (or (eq key 'unknown) (null key))
+        (if (stringp key) "" -1)
+      key)))
+
+(defun llm-pick-view-sort-toggle (order)
+  "Re-render the main view sorted by ORDER.
+The first press sorts the column in its default direction
+\\(numeric columns strongest first, the name column ascending);
+pressing the same key again flips it."
+  (if (equal llm-pick-view--order order)
+      (setq llm-pick-view--reverse (not llm-pick-view--reverse))
+    (setq llm-pick-view--order order
+          llm-pick-view--reverse nil))
+  (llm-pick-view-main))
 
 (defun llm-pick-view--main-groups (records)
   "Return RECORDS grouped by the exact set of sources naming them.
@@ -426,10 +564,13 @@ per source holds what only that source lists."
           (if (> (length sources) 1)
               (progn
                 (setq shared-key (mapcar #'symbol-name sources))
-                (puthash shared-key (cons record (gethash shared-key shared))
+                (puthash shared-key
+                         (append (gethash shared-key shared) (list record))
                          shared))
             (let ((key (list (mapcar #'symbol-name sources))))
-              (puthash key (cons record (gethash key only)) only))))))
+              (puthash key
+                       (append (gethash key only) (list record))
+                       only))))))
     (append
      (when shared-key
        (list (cons "shared by several sources"
@@ -449,16 +590,12 @@ The models are grouped in sections: the canonical IDs several sources
 share first, then one section per source for what it lists alone."
   (interactive "P")
   (let* ((records (llm-pick-view--models refresh))
-         (kept (if llm-pick-view--filter
-                   (cl-remove-if-not llm-pick-view--filter records)
-                 records))
-         (groups (llm-pick-view--main-groups (llm-pick-view--sort kept))))
+         (groups (llm-pick-view--main-groups (llm-pick-view--sort records))))
     (pop-to-buffer (get-buffer-create "*llm-pick*"))
     (llm-pick-view-mode)
     (llm-pick-view--render
      'main
-     (format "llm-pick: %d of %d models"
-             (length kept) (length records))
+     (format "llm-pick: %d models" (length records))
      (lambda ()
        (llm-pick-view--insert-columns '("Model" "Score" "In $/M" "Value"))
        (insert "\n")
@@ -472,67 +609,6 @@ share first, then one section per source for what it lists alone."
   "Re-render the main view sorted by FIELD, strongest first."
   (setq llm-pick-view--order field)
   (llm-pick-view-main))
-
-(defun llm-pick-view-sort-price ()
-  "Sort the main view by output price, cheapest first."
-  (interactive)
-  (setq llm-pick-view--order 'or-out)
-  (let ((llm-pick-view--filter llm-pick-view--filter))
-    (llm-pick-view-main--sorted
-     (lambda (a b)
-       (< (or (llm-pick-core--field a 'or-out) most-positive-fixnum)
-          (or (llm-pick-core--field b 'or-out) most-positive-fixnum))))))
-
-(defun llm-pick-view-sort-score ()
-  "Sort the main view by capability score, strongest first."
-  (interactive)
-  (setq llm-pick-view--order 'score)
-  (llm-pick-view-main))
-
-(defun llm-pick-view-main--sorted (less-p)
-  "Re-render the main view with the internal LESS-P order."
-  (let* ((records (llm-pick-view--models))
-         (kept (if llm-pick-view--filter
-                   (cl-remove-if-not llm-pick-view--filter records)
-                 records))
-         (groups (llm-pick-view--main-groups
-                  (sort (copy-sequence kept) less-p))))
-    (with-current-buffer "*llm-pick*"
-      (llm-pick-view--render
-       'main (format "llm-pick: %d of %d models" (length kept) (length records))
-       (lambda ()
-         (dolist (group groups)
-           (llm-pick-view--insert-header (car group))
-           (llm-pick-view--insert-entries (cdr group))))))))
-
-(defun llm-pick-view-filter ()
-  "Ask for a price cap and per-category score floors, keep what fits.
-An empty answer at any prompt means no limit on that axis."
-  (interactive)
-  (let* ((cap-text (read-string "Max output price $/M (empty = all): "))
-         (cap (and (string-match-p "\\`[0-9.]+\\'" cap-text)
-                   (string-to-number cap-text)))
-         (source (symbol-value 'llm-pick-core-default-capability-source))
-         (floors nil))
-    (dolist (category (llm-pick-query-read-values :category))
-      (let* ((answer (read-string (format "Min %s score (empty = all): "
-                                          category)))
-             (floor (and (string-match-p "\\`[0-9.]+\\'" answer)
-                         (string-to-number answer))))
-        (when floor
-          (push (cons category floor) floors))))
-    (setq llm-pick-view--filter
-          (lambda (record)
-            (and (or (null cap)
-                     (and (numberp (llm-pick-core--field record 'or-out))
-                          (<= (llm-pick-core--field record 'or-out) cap)))
-                 (cl-every
-                  (lambda (entry)
-                    (let ((score (llm-pick-core--score record source
-                                                       (car entry))))
-                      (and (numberp score) (>= score (cdr entry)))))
-                  floors))))
-    (llm-pick-view-main)))
 
 (defun llm-pick-view-refresh ()
   "Throw the cache away, fetch every source again and re-render."
@@ -668,128 +744,7 @@ result is an alist ((TITLE . MODELS)...), empty bands left out."
           (cl-pushnew (cdar key) categories :test #'equal))))
     (nreverse categories)))
 
-(defun llm-pick-view-compare (baseline)
-  "Show the compare view of BASELINE: every category, stronger and weaker.
-The model view model stays at the top so the two can be read side by
-side; several compare views of one model view can be open at once."
-  (let* ((records (llm-pick-view--models))
-         (others (cl-remove-if (lambda (other) (equal other baseline)) records))
-         (source (symbol-value 'llm-pick-core-default-capability-source))
-         (categories (or (llm-pick-view--category-columns records) '(nil)))
-         (buffer (get-buffer-create
-                  (format "*llm-pick compare %s*"
-                          (llm-pick-core--field baseline 'name)))))
-    (pop-to-buffer buffer)
-    (llm-pick-view-mode)
-    (setq llm-pick-view--baseline baseline)
-    (llm-pick-view--render
-     'compare (format "llm-pick compare: %s"
-                      (llm-pick-core--field baseline 'name))
-     (lambda ()
-       (insert (llm-pick-view--metadata baseline) "\n")
-       (llm-pick-view--insert-header "Baseline" "This is the model the sections below compare against.")
-       (insert "")
-       (dolist (category categories)
-         (let (stronger weaker)
-           (dolist (other others)
-             (let ((delta (llm-pick-analyze--benchmark-delta
-                           other baseline source category)))
-               (when delta
-                 (if (> delta 0) (push other stronger) (push other weaker)))))
-           (llm-pick-view--insert-header
-            (if category
-                (format "%s: stronger than the baseline" category)
-              "Stronger than the baseline"))
-           (if stronger (llm-pick-view--insert-entries stronger)
-             (insert "  none\n"))
-           (llm-pick-view--insert-header
-            (if category
-                (format "%s: weaker than the baseline" category)
-              "Weaker than the baseline"))
-           (if weaker (llm-pick-view--insert-entries weaker)
-             (insert "  none\n"))))))))
-
-(defun llm-pick-view-compare-here ()
-  "Open the compare view around the model view's model."
-  (interactive)
-  (if llm-pick-view--baseline
-      (llm-pick-view-compare llm-pick-view--baseline)
-    (user-error "No model to compare against here")))
-
 ;;; Side-by-side diff
-
-(defun llm-pick-view-diff (model baseline)
-  "Show MODEL against BASELINE, every field side by side, in one buffer."
-  (let* ((source (symbol-value 'llm-pick-core-default-capability-source))
-         (categories (delete-dups
-                      (append (llm-pick-view--category-columns (list model))
-                              (llm-pick-view--category-columns (list baseline)))))
-         (rows
-          (append
-           (list
-            (list "Vendor"
-                  (or (llm-pick-core--field baseline 'vendor) "-")
-                  (or (llm-pick-core--field model 'vendor) "-"))
-            (list "Family"
-                  (or (llm-pick-core--field baseline 'family) "-")
-                  (or (llm-pick-core--field model 'family) "-"))
-            (list "Score"
-                  (llm-pick-view--num (llm-pick-core--field baseline 'score))
-                  (llm-pick-view--num (llm-pick-core--field model 'score)))
-            (list "$/M out"
-                  (llm-pick-view--num (llm-pick-core--field baseline 'or-out))
-                  (llm-pick-view--num (llm-pick-core--field model 'or-out)))
-            (list "$/M in"
-                  (llm-pick-view--num (llm-pick-core--field baseline 'or-in))
-                  (llm-pick-view--num (llm-pick-core--field model 'or-in))))
-           (mapcar (lambda (category)
-                     (list (format "Score %s" (or category "default"))
-                           (llm-pick-view--num
-                            (llm-pick-core--score baseline source category))
-                           (llm-pick-view--num
-                            (llm-pick-core--score model source category))))
-                   categories)
-           (list
-            (list "Providers"
-                  (mapconcat (lambda (p) (format "%s" (car p)))
-                             (plist-get baseline :providers) ", ")
-                  (mapconcat (lambda (p) (format "%s" (car p)))
-                             (plist-get model :providers) ", ")))))
-         (width (apply #'max 10 (mapcar (lambda (row) (length (car row))) rows)))
-         (width-a (apply #'max 20
-                         (mapcar (lambda (row) (length (nth 1 row))) rows)))
-         (buffer (get-buffer-create
-                  (format "*llm-pick %s vs %s*"
-                          (llm-pick-core--field baseline 'name)
-                          (llm-pick-core--field model 'name)))))
-    (pop-to-buffer buffer)
-    (llm-pick-view-mode)
-    (setq llm-pick-view--baseline baseline
-          llm-pick-view--kind 'compare)
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert (format "%s against %s\n\n"
-                      (llm-pick-core--field baseline 'name)
-                      (llm-pick-core--field model 'name)))
-      (insert (concat (llm-pick-render-report--pad "Field" width nil) "  "
-                      (llm-pick-render-report--pad
-                       (llm-pick-core--field baseline 'name) width-a nil) "  "
-                      (llm-pick-core--field model 'name) "\n"))
-      (dolist (row rows)
-        (insert (concat (llm-pick-render-report--pad (car row) width nil) "  "
-                        (llm-pick-render-report--pad (nth 1 row) width-a nil) "  "
-                        (nth 2 row) "\n")))
-      (goto-char (point-min))
-      (setq header-line-format
-            (llm-pick-view--header-line 'compare)))))
-
-(defun llm-pick-view-diff-here ()
-  "Show the model under the cursor against the baseline, side by side."
-  (interactive)
-  (let ((model (llm-pick-view--entry-at-point)))
-    (if (and model llm-pick-view--baseline)
-        (llm-pick-view-diff model llm-pick-view--baseline)
-      (user-error "Put the cursor on a model line first"))))
 
 ;;; Dispatching
 
@@ -802,13 +757,9 @@ side; several compare views of one model view can be open at once."
       (user-error "Put the cursor on a model line first"))))
 
 (defun llm-pick-view-quit ()
-  "Go back one level: compare to model, model to main, main to nothing."
+  "Go back one level: model to main, main to nothing."
   (interactive)
   (pcase llm-pick-view--kind
-    ('compare
-     (let ((record (or (llm-pick-view--entry-at-point)
-                       llm-pick-view--baseline)))
-       (if record (llm-pick-view-model record) (llm-pick-view-main))))
     ('model (llm-pick-view-main))
     (_ (quit-window))))
 
