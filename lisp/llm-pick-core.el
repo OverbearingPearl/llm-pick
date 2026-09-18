@@ -83,7 +83,7 @@ ARGS is a plist of fields merged into the record, for instance
 (defun llm-pick-core--field (m field)
   "Return the value of FIELD in the model record M.
 FIELD is the symbol `name', `provider', `vendor', `family', `scope',
-`score', `or-in', `or-out', `bm-in', `bm-out', `gap', `value' or
+`score', `value', `or-in', `or-out', `bm-in', `bm-out', `gap',
 `openrouter-id', or a list of the form \(score SOURCE), \(score SOURCE
 CATEGORY) or \(price SOURCE DIRECTION).
 `vendor' and `family' are read off the canonical ID rather than stored,
@@ -93,6 +93,8 @@ for a model whose vendor is known, so an ID no vendor claims answers nil
 for both instead of inventing a maker for it, while
 \(vendor = \"anthropic\") selects every Anthropic model and
 \(family = \"deepseek\") every DeepSeek release.
+`value' is the capability per dollar: the default score divided by the
+default source's output price, nil when either is missing.
 The value is nil when M does not carry the requested information."
   (pcase field
     ('name (plist-get m :canonical))
@@ -104,12 +106,16 @@ The value is nil when M does not carry the requested information."
          (car (split-string (downcase id) "-")))))
     ('scope (plist-get m :scope))
     ('score (llm-pick-core--default-score m))
+    ('value
+     (let ((score (llm-pick-core--default-score m))
+           (price (llm-pick-core--price m llm-pick-core-default-price-source 'out)))
+       (when (and (numberp score) (numberp price) (> price 0))
+         (/ score price))))
     ('or-in (llm-pick-core--price m llm-pick-core-default-price-source 'in))
     ('or-out (llm-pick-core--price m llm-pick-core-default-price-source 'out))
     ('bm-in (llm-pick-core--price m llm-pick-core-secondary-price-source 'in))
     ('bm-out (llm-pick-core--price m llm-pick-core-secondary-price-source 'out))
     ('gap (llm-pick-core--price-gap m))
-    ('value (llm-pick-core--value m))
     ('openrouter-id (cdr (assq 'openrouter (plist-get m :providers))))
     (`(score ,source) (llm-pick-core--score m source nil))
     (`(score ,source ,category) (llm-pick-core--score m source category))
@@ -279,13 +285,6 @@ no second price source is registered, see
     (when (and (numberp first) (numberp second)
                (> first 0) (> second 0))
       (/ (abs (- first second)) (float (min first second))))))
-
-(defun llm-pick-core--value (m)
-  "Return the capability per dollar of M, or nil when it is unknown."
-  (let ((score (llm-pick-core--default-score m))
-        (price (llm-pick-core--price m llm-pick-core-default-price-source 'out)))
-    (when (and (numberp score) (numberp price) (> price 0))
-      (/ score price))))
 
 ;;; Predicates
 

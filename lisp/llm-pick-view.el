@@ -170,7 +170,7 @@ This includes provider sources."
   "Return one summary line for RECORD.
 Columns: model name, overall score, one BenchLM cell joining the 8
 category scores with '/', one OpenRouter cell joining the 3 Artificial
-Analysis scores with '/', value, one price cell per source joining in
+Analysis scores with '/', one price cell per source joining in
 and out with '/', and the OpenRouter id.
 Category scores render as exactly 3-character integers (%3.0f,
 missing as \"---\"), joined with '/' with no padding, so the BenchLM
@@ -184,9 +184,10 @@ llm-pick-core-default-price-source, followed by the secondary price
 source, named by the variable
 llm-pick-core-secondary-price-source.  Both names are resolved
 dynamically here since those variables live in llm-pick.el.  The
-name, score, value and id columns keep their fixed widths (the name
-column is 54 characters wide and the id column is left-aligned at 24
-characters) so they
+name, score and id columns keep their fixed widths (the name
+column is 54 characters wide, and longer display names are
+truncated to 54 characters so that all columns stay aligned, and
+the id column is left-aligned at 24 characters) so they
 still line up with the header from llm-pick-view--insert-columns."
   (let* ((default-price (symbol-value 'llm-pick-core-default-price-source))
          (secondary-price (symbol-value 'llm-pick-core-secondary-price-source))
@@ -214,10 +215,12 @@ still line up with the header from llm-pick-view--insert-columns."
                         (funcall price-cell
                                  (llm-pick-core--price record source 'out)
                                  source))))
+         (name (truncate-string-to-width
+                (or (plist-get record :display-name)
+                    (llm-pick-core--field record 'name))
+                54))
          (cells (append
-                 (list (format "%-54s"
-                               (or (plist-get record :display-name)
-                                   (llm-pick-core--field record 'name))))
+                 (list (format "%-54s" name))
                  (list (format "%9s"
                                (funcall bare-num (llm-pick-core--field record 'score))))
                  (list (funcall join
@@ -230,7 +233,6 @@ still line up with the header from llm-pick-view--insert-columns."
                                  (lambda (cat)
                                    (funcall bare-num (llm-pick-core--score record 'openrouter cat)))
                                  aa-categories)))
-                 (list (llm-pick-view--num (llm-pick-core--field record 'value) 9))
                  (list (funcall price-pair default-price))
                  (list (funcall price-pair secondary-price))
                  (list (format "%-24s"
@@ -259,9 +261,10 @@ Each score value is a fixed 3-character integer; missing values are
 shown as \"---\".
 
 Column widths match those used by `llm-pick-view--line' so the header
-aligns with the data rows: name %-54s, score %9s, BenchLM joined cell
-31 chars, OR joined cell 11 chars, value %9s, each price cell 15
-chars, and the OpenRouter id left-aligned in %-24s."
+aligns with the data rows: name %-54s (matching
+`llm-pick-view--line''s truncation of display names to 54 characters),
+score %9s, BenchLM joined cell 31 chars, OR joined cell 11 chars, each
+price cell 15 chars, and the OpenRouter id left-aligned in %-24s."
   (let* ((head (concat (format "%-54s  %9s" "Model" "Score")))
          ;; The joined score cells aggregate category scores; list the
          ;; abbreviations so the compact columns are interpretable:
@@ -273,7 +276,6 @@ chars, and the OpenRouter id left-aligned in %-24s."
          (head (concat head "  " (format "%-31s"
                                          "BenchLM Ag Co Re Mm Kn Ml IF Ma")))
          (head (concat head "  " (format "%-11s" "OR In Co Ag")))
-         (head (concat head "  " (format "%9s" "Value")))
          (head (concat head "  " (format "%-15s" "BenchLM $/M")))
          (head (concat head "  " (format "%-15s" "OpenRT $/M")))
          (head (concat head "  " (format "%-24s" "OpenRouter id")))
@@ -310,7 +312,7 @@ BODY is a function inserting the buffer content."
   (concat "llm-pick "
           (pcase kind
             ('main
-             "[n/p j/k entry] [f/b section] [RET model] [s price | S score | v value] [F filter] [g refresh] [q quit]")
+             "[n/p j/k entry] [f/b section] [RET model] [s price | S score] [F filter] [g refresh] [q quit]")
             ('model
              "[n/p j/k entry] [f/b section] [RET model] [c compare] [q back]")
             ('compare
@@ -370,7 +372,7 @@ BODY is a function inserting the buffer content."
     (define-key map "g" 'llm-pick-view-refresh)
     (define-key map "s" 'llm-pick-view-sort-price)
     (define-key map "S" 'llm-pick-view-sort-score)
-    (define-key map "v" 'llm-pick-view-sort-value)
+    
     (define-key map "F" 'llm-pick-view-filter)
     (define-key map "c" 'llm-pick-view-compare-here)
     (define-key map "d" 'llm-pick-view-diff-here)
@@ -475,12 +477,6 @@ share first, then one section per source for what it lists alone."
   (setq llm-pick-view--order 'score)
   (llm-pick-view-main))
 
-(defun llm-pick-view-sort-value ()
-  "Sort the main view by capability per dollar, best first."
-  (interactive)
-  (setq llm-pick-view--order 'value)
-  (llm-pick-view-main))
-
 (defun llm-pick-view-main--sorted (less-p)
   "Re-render the main view with the internal LESS-P order."
   (let* ((records (llm-pick-view--models))
@@ -542,9 +538,7 @@ An empty answer at any prompt means no limit on that axis."
           (format "Name:      %s" (or (plist-get record :display-name) "-"))
           (format "Vendor:    %s" (or (llm-pick-core--field record 'vendor) "-"))
           (format "Family:    %s" (or (llm-pick-core--field record 'family) "-"))
-          (format "Scope:     %s" (llm-pick-core--field record 'scope))
-          (format "Value:     %s"
-                  (llm-pick-view--num (llm-pick-core--field record 'value))))))
+          (format "Scope:     %s" (llm-pick-core--field record 'scope)))))
     (dolist (key (plist-get record :scores))
       (setq lines
             (append lines
@@ -735,10 +729,7 @@ side; several compare views of one model view can be open at once."
                   (llm-pick-view--num (llm-pick-core--field model 'or-out)))
             (list "$/M in"
                   (llm-pick-view--num (llm-pick-core--field baseline 'or-in))
-                  (llm-pick-view--num (llm-pick-core--field model 'or-in)))
-            (list "Score/$"
-                  (llm-pick-view--num (llm-pick-core--field baseline 'value))
-                  (llm-pick-view--num (llm-pick-core--field model 'value))))
+                  (llm-pick-view--num (llm-pick-core--field model 'or-in))))
            (mapcar (lambda (category)
                      (list (format "Score %s" (or category "default"))
                            (llm-pick-view--num

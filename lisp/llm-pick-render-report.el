@@ -51,13 +51,12 @@
     (bm-in . "2nd $/M in")
     (bm-out . "2nd $/M out")
     (gap . "Gap")
-    (value . "Score/$")
     (gain . "Gain/$")
     (bound . "Up to $/M out"))
   "Header text of the columns known by name.")
 
 (defconst llm-pick-render-report--right-aligned
-  '(score or-in or-out bm-in bm-out gap value gain bound)
+  '(score or-in or-out bm-in bm-out gap gain bound)
   "Columns whose cells are aligned to the right.")
 
 (defconst llm-pick-render-report--formats '(table csv)

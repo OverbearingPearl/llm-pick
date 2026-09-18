@@ -21,7 +21,7 @@
 ;; `llm-pick-collect' returned and returns the records the user asked
 ;; for; everything here is pure.
 ;;
-;; Price means the output price, the same axis `llm-pick-core--value', the
+;; Price means the output price, the same axis , the
 ;; Pareto frontier and the price ladder use.  A model that lacks the
 ;; field a criterion needs is dropped, never guessed at: a model without
 ;; a price cannot be shown to be affordable.

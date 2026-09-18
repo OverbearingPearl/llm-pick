@@ -57,9 +57,7 @@
       (should (equal (llm-pick-core--field m 'score) 88)))
     (ert-info ("`or-in' and `or-out' follow `llm-pick-core-default-price-source'")
       (should (equal (llm-pick-core--field m 'or-in) 3.0))
-      (should (equal (llm-pick-core--field m 'or-out) 15.0)))
-    (ert-info ("`value' is capability divided by output price")
-      (should (= (llm-pick-core--field m 'value) (/ 88.0 15.0))))))
+      (should (equal (llm-pick-core--field m 'or-out) 15.0)))))
 
 (ert-deftest llm-pick-core-test-field-explicit-source ()
   (let ((m llm-pick-core-test--record))

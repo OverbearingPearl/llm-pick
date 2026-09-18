@@ -37,8 +37,7 @@
 ;;   M-x llm-pick-report-query     the same, asking for the query first
 ;;   M-x llm-pick-report-frontier  the frontier with the gain per step
 ;;   M-x llm-pick-report-ladder    the models bucketed by price
-;;   M-x llm-pick-top-value        the best models by capability per dollar
-;;   M-x llm-pick-cheap-strong     capable models that cost little
+;;   ;;   M-x llm-pick-cheap-strong     capable models that cost little
 ;;   M-x llm-pick-pick-interactive the best model under a budget
 ;;   M-x llm-pick-align-report     what the last alignment did
 ;;   M-x llm-pick-align-check      every ID problem of a run, in one buffer
@@ -405,15 +404,6 @@ has no effect.
 ARGS is a plist for `llm-pick-report'."
   (interactive (llm-pick--report-interactive current-prefix-arg))
   (apply #'llm-pick-report :mode 'ladder args))
-
-;;;###autoload
-(defun llm-pick-top-value ()
-  "Show the ten models with the most capability per dollar.
-A `table' report over every model, ordered by the `value' field, the
-capability score divided by the output price, so the models that give
-the most capability for the money come first."
-  (interactive)
-  (llm-pick-report :order 'value :descending t :top 10))
 
 ;;;###autoload
 (defun llm-pick-report-query ()

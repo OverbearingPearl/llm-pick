@@ -89,15 +89,6 @@
                                                '(0.25 1.0 nil)))
                      '(1.0 nil))))))
 
-(ert-deftest llm-pick-analyze-test-best-value ()
-  (let ((llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter))
-    (ert-info ("60/0.5 = 120 beats the capability per dollar of every other model")
-      (should (equal (llm-pick-core--field
-                      (llm-pick-analyze--best-value llm-pick-analyze-test--models)
-                      'name)
-                     "weak-cheap")))))
-
 (ert-deftest llm-pick-analyze-test-next-upgrade ()
   (let ((mid (nth 1 llm-pick-analyze-test--models))
         (top (nth 4 llm-pick-analyze-test--models))
@@ -132,7 +123,7 @@
       (should (equal (llm-pick-analyze-test--names models)
                      '("expensive" "cheap"))))
     (ert-info ("The other entry points leave the input alone as well")
-      (llm-pick-analyze--best-value models)
+      ()
       (should (equal (llm-pick-analyze-test--names models)
                      '("expensive" "cheap")))
       (llm-pick-analyze--marginal models)

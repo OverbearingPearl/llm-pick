@@ -90,15 +90,6 @@ a nil gain because there is nothing to compare it with."
       (setq previous model))
     (nreverse result)))
 
-(defun llm-pick-analyze--best-value (models)
-  "Return the model of MODELS with the highest capability per dollar.
-MODELS itself keeps its order; the sort runs on a copy."
-  (car (sort (cl-remove-if-not
-              (lambda (model) (numberp (llm-pick-core--field model 'value)))
-              (copy-sequence models))
-             (lambda (a b) (> (llm-pick-core--field a 'value)
-                              (llm-pick-core--field b 'value))))))
-
 (defun llm-pick-analyze--next-upgrade (models model)
   "Return the cheapest model of MODELS that is more capable than MODEL.
 MODELS itself keeps its order; the sort runs on a copy."
