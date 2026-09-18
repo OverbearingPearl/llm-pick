@@ -168,61 +168,72 @@ This includes provider sources."
 
 (defun llm-pick-view--line (record)
   "Return one summary line for RECORD.
-Columns: model name, overall score, BenchLM category scores,
-Artificial Analysis scores, value, prices, and OpenRouter id.
-The two price columns are, in order: the default price source,
-named by the variable llm-pick-core-default-price-source, and
-the secondary price source, named by the variable
+Columns: model name, overall score, one BenchLM cell joining the 8
+category scores with '/', one OpenRouter cell joining the 3 Artificial
+Analysis scores with '/', value, one price cell per source joining in
+and out with '/', and the OpenRouter id.
+Category scores render as exactly 3-character integers (%3.0f,
+missing as \"---\"), joined with '/' with no padding, so the BenchLM
+cell is 8*3+7=31 characters and the OpenRouter cell is 3*3+2=11
+characters.  Price halves render as %7.3f (width 7); a nil price or
+a 0 price from a non-openrouter source renders as \" --.---\" (the
+zero/unknown marker), an openrouter 0 renders as \"  0.000\".  The
+in and out halves are joined with '/' into a 15-character cell.  The
+price cells are for the default price source, named by the variable
+llm-pick-core-default-price-source, followed by the secondary price
+source, named by the variable
 llm-pick-core-secondary-price-source.  Both names are resolved
-dynamically here since those variables live in llm-pick.el.
-Price cells: nil renders as \"-\"; a 0 price from an openrouter
-source renders as \"free\"; a 0 price from any other source,
-including benchlm and nil, renders as \"-\" because 0 there
-means unknown; any other number is rendered with %g."
+dynamically here since those variables live in llm-pick.el.  The
+name, score, value and id columns keep their fixed widths (the name
+column is 54 characters wide and the id column is left-aligned at 24
+characters) so they
+still line up with the header from llm-pick-view--insert-columns."
   (let* ((default-price (symbol-value 'llm-pick-core-default-price-source))
          (secondary-price (symbol-value 'llm-pick-core-secondary-price-source))
          (benchlm-categories '("agentic" "coding" "reasoning" "multimodalGrounded"
                                "knowledge" "multilingual" "instructionFollowing" "math"))
          (aa-categories '("intelligence" "coding" "agentic"))
-         (price-cell (lambda (price source width)
+         (bare-num (lambda (n)
+                     (if (numberp n) (format "%3.0f" n) "---")))
+         (price-cell (lambda (price source)
                        (cond
                         ((or (null price) (and (numberp price) (zerop price)
                                                (not (eq source 'openrouter))))
-                         (format (concat "%" (number-to-string width) "s") "-"))
+                         " --.---")
                         ((and (numberp price) (zerop price))
-                         (format (concat "%" (number-to-string width) "s") "free"))
+                         "  0.000")
                         (t
-                         (format (concat "%" (number-to-string width) "s")
-                                 (format "%g" price))))))
+                         (format "%7.3f" price)))))
+         (join (lambda (parts) (mapconcat #'identity parts "/")))
+         (price-pair (lambda (source)
+                       (concat
+                        (funcall price-cell
+                                 (llm-pick-core--price record source 'in)
+                                 source)
+                        "/"
+                        (funcall price-cell
+                                 (llm-pick-core--price record source 'out)
+                                 source))))
          (cells (append
-                 (list (format "%-44s"
+                 (list (format "%-54s"
                                (or (plist-get record :display-name)
                                    (llm-pick-core--field record 'name))))
-                 (list (llm-pick-view--num (llm-pick-core--field record 'score) 9))
-                 (mapcar
-                  (lambda (cat)
-                    (llm-pick-view--num (llm-pick-core--score record 'benchlm cat) 9))
-                  benchlm-categories)
-                 (mapcar
-                  (lambda (cat)
-                    (llm-pick-view--num (llm-pick-core--score record 'openrouter cat) 9))
-                  aa-categories)
+                 (list (format "%9s"
+                               (funcall bare-num (llm-pick-core--field record 'score))))
+                 (list (funcall join
+                                (mapcar
+                                 (lambda (cat)
+                                   (funcall bare-num (llm-pick-core--score record 'benchlm cat)))
+                                 benchlm-categories)))
+                 (list (funcall join
+                                (mapcar
+                                 (lambda (cat)
+                                   (funcall bare-num (llm-pick-core--score record 'openrouter cat)))
+                                 aa-categories)))
                  (list (llm-pick-view--num (llm-pick-core--field record 'value) 9))
-                 (list (concat (funcall price-cell
-                                        (llm-pick-core--price record default-price 'in)
-                                        default-price 6)
-                               " "
-                               (funcall price-cell
-                                        (llm-pick-core--price record default-price 'out)
-                                        default-price 7)))
-                 (list (concat (funcall price-cell
-                                        (llm-pick-core--price record secondary-price 'in)
-                                        secondary-price 6)
-                               " "
-                               (funcall price-cell
-                                        (llm-pick-core--price record secondary-price 'out)
-                                        secondary-price 7)))
-                 (list (format "%24s"
+                 (list (funcall price-pair default-price))
+                 (list (funcall price-pair secondary-price))
+                 (list (format "%-24s"
                                (or (cdr (assq 'openrouter (plist-get record :providers)))
                                    "-"))))))
     (mapconcat #'identity cells "  ")))
@@ -238,26 +249,34 @@ means unknown; any other number is rendered with %g."
 
 (defun llm-pick-view--insert-columns (&optional _columns)
   "Insert the column header line with `llm-pick-view-column-face'.
-The In/Out column labels follow `llm-pick-core-default-price-source'
-and `llm-pick-core-secondary-price-source'."
-  (let* ((benchlm-cats '("Agentic" "Coding" "Reasoning" "Multimodal"
-                         "Knowledge" "Multiling" "Instr-F" "Math"))
-         (aa-cats '("OR-Int" "OR-Code" "OR-Agnt"))
-         (default-label (upcase
-                         (if (boundp 'llm-pick-core-default-price-source)
-                             (symbol-name llm-pick-core-default-price-source)
-                           "bl")))
-         (secondary-label (upcase
-                           (if (boundp 'llm-pick-core-secondary-price-source)
-                               (symbol-name llm-pick-core-secondary-price-source)
-                             "openrouter")))
-         (head (concat (format "%-44s  %9s" "Model" "Score")))
-         (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) benchlm-cats "  ")))
-         (head (concat head "  " (mapconcat (lambda (c) (format "%9s" c)) aa-cats "  ")))
+
+Category abbreviations in the header cells:
+  BenchLM: Ag = Agentic, Co = Coding, Re = Reasoning, Mm = Multimodal,
+           Kn = Knowledge, Ml = Multiling, IF = Instr-F, Ma = Math
+  OpenRouter (OR): In = Intelligence, Co = Coding, Ag = Agentic.
+
+Each score value is a fixed 3-character integer; missing values are
+shown as \"---\".
+
+Column widths match those used by `llm-pick-view--line' so the header
+aligns with the data rows: name %-54s, score %9s, BenchLM joined cell
+31 chars, OR joined cell 11 chars, value %9s, each price cell 15
+chars, and the OpenRouter id left-aligned in %-24s."
+  (let* ((head (concat (format "%-54s  %9s" "Model" "Score")))
+         ;; The joined score cells aggregate category scores; list the
+         ;; abbreviations so the compact columns are interpretable:
+         ;; BenchLM has 8 categories (8*3+7=31 chars), OpenRouter-derived
+         ;; scores have 3 (3*3+2=11 chars).  The full names exceed the
+         ;; cell width, so the compact form is used; see the docstring
+         ;; for the mapping.  Each score value is a fixed 3-character
+         ;; integer (missing as "---").
+         (head (concat head "  " (format "%-31s"
+                                         "BenchLM Ag Co Re Mm Kn Ml IF Ma")))
+         (head (concat head "  " (format "%-11s" "OR In Co Ag")))
          (head (concat head "  " (format "%9s" "Value")))
-         (head (concat head "  " (format "%14s" (format "In/Out (%s)" default-label))))
-         (head (concat head "  " (format "%14s" (format "In/Out (%s)" secondary-label))))
-         (head (concat head "  " (format "%24s" "OpenRouter id")))
+         (head (concat head "  " (format "%-15s" "BenchLM $/M")))
+         (head (concat head "  " (format "%-15s" "OpenRT $/M")))
+         (head (concat head "  " (format "%-24s" "OpenRouter id")))
          (start (point)))
     (insert (propertize head 'face 'llm-pick-view-column-face) "\n")
     (put-text-property start (point) 'llm-pick-header t)))
