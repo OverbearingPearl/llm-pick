@@ -94,10 +94,14 @@ Buffer-local state is derived from this; a refresh replaces it.")
 (defvar-local llm-pick-view--order nil
   "Field a main view sorts its models by, or nil for the canonical ID.")
 
-(defvar llm-pick-view--reverse nil
+(defvar-local llm-pick-view--reverse nil
   "Non-nil when the main view sorts in the flipped direction.
 Numeric columns default to descending and the name column to
 ascending; repeating the same sort key toggles this.")
+
+(progn
+  (put 'llm-pick-view--order 'permanent-local t)
+  (put 'llm-pick-view--reverse 'permanent-local t))
 
 ;;; Collection cache
 
@@ -577,9 +581,11 @@ per source holds what only that source lists."
                    (gethash shared-key shared))))
      (let (groups)
        (maphash (lambda (key models)
-                  (push (cons (format "only in %s" (mapconcat #'identity (car key) ", "))
-                              models)
-                        groups))
+                  (setq groups
+                        (append groups
+                                (list (cons (format "only in %s"
+                                                    (mapconcat #'identity (car key) ", "))
+                                            models)))))
                 only)
        (sort groups (lambda (a b) (string< (car a) (car b))))))))
 
