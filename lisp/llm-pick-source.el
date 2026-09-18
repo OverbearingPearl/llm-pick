@@ -15,13 +15,9 @@
 ;;
 ;;   :kind        capability, price or both
 ;;   :description one line for the user
-;;   :loader      function called with an options plist, returning
-;;                entries; it reads the offline snapshot
 ;;   :fetcher     function of the same shape that reads the service
 ;;                itself, optional; it is used unless `llm-pick-source-offline'
 ;;                is non-nil
-;;   :fixture     file name of the offline snapshot, looked up in
-;;                `llm-pick-source-fixture-directory'
 ;;
 ;; A loader returns entries, each a plist:
 ;;
@@ -37,12 +33,6 @@
 ;; `llm-pick-source-register' and the alignment, analysis and rendering
 ;; layers pick it up.
 ;;
-;; By default a source reads its service over the network and caches the
-;; answer in `llm-pick-cache-dir'; with `llm-pick-source-offline' non-nil it
-;; reads the snapshot its descriptor names instead, in the JSON layout
-;; that `llm-pick-source--fixture-loader' reads.  The built-in sources
-;; carry a :fetcher only, so offline collecting needs a snapshot
-;; registered for the name.
 
 ;;; Code:
 
@@ -54,8 +44,6 @@
 (require 'llm-pick-fetch-get)
 
 ;; The user options live in llm-pick.el, which requires this module.
-(defvar llm-pick-source-fixture-directory)
-(defvar llm-pick-source-offline)
 (defvar llm-pick-source-openrouter-api-key)
 
 ;;; Registry
@@ -83,47 +71,6 @@ Return NAME."
   "Return the names of the registered sources, in registration order."
   (mapcar #'car llm-pick-source-sources))
 
-(defun llm-pick-source--fixture (name)
-  "Return the fixture that backs source NAME, resolved to a path.
-If NAME names a snapshot with :fixture, and the fixture is a real
-file name (not inline JSON), `llm-pick-source-fixture-directory'
-must be set and the file name is expanded against it; otherwise
-signal `llm-pick-error'.  A :fixture that is an inline JSON string
-beginning with \"{\" (or a list of such strings) is returned as-is;
-inline JSON snapshots do not require a fixture directory."
-  (let ((fixture (plist-get (llm-pick-source--descriptor name) :fixture)))
-    (cond
-     ((and (stringp fixture)
-           (string-prefix-p "{" fixture))
-      fixture)
-     ((and (listp fixture)
-           (cl-every (lambda (s) (and (stringp s) (string-prefix-p "{" s)))
-                     fixture))
-      fixture)
-     (fixture
-      (unless llm-pick-source-fixture-directory
-        (signal 'llm-pick-error
-                (list (format "Source %s names snapshot file %s but `llm-pick-source-fixture-directory' is nil"
-                              name fixture))))
-      (expand-file-name fixture llm-pick-source-fixture-directory)))))
-
-;;; Snapshot loading
-
-(defun llm-pick-source--read-json (file)
-  "Return the JSON content of FILE as hash tables, lists and scalars.
-Objects become hash tables with string keys.  Signal `llm-pick-error'
-when FILE does not exist."
-  (unless (file-readable-p file)
-    (signal 'llm-pick-error
-            (list (format "Source snapshot not found: %s" file))))
-  ;; Same reasoning as the service cache: JSON is UTF-8 by definition, so
-  ;; the encoding of a snapshot is not something to ask about, and naming
-  ;; it here keeps a snapshot with an unclear encoding from prompting.
-  (let ((coding-system-for-read 'utf-8))
-    (llm-pick-core--parse-json (with-temp-buffer
-                            (insert-file-contents file)
-                            (buffer-string)))))
-
 (defun llm-pick-source--json-field (object key)
   "Return KEY of the parsed JSON OBJECT, or nil.
 OBJECT is a hash table as produced by `llm-pick-source--read-json'."
@@ -140,89 +87,6 @@ on hash table order."
                  ids)
         (sort result (lambda (a b) (string< (symbol-name (car a))
                                             (symbol-name (car b)))))))))
-
-(defun llm-pick-source--fixture-score (model category)
-  "Return the capability score of a parsed JSON MODEL.
-CATEGORY selects one entry of the \"scores\" object; nil means the
-highest score of any category."
-  (let ((scores (llm-pick-source--json-field model "scores")))
-    (when (hash-table-p scores)
-      (if category
-          (gethash category scores)
-        (let (best)
-          (maphash (lambda (_category score)
-                     (when (and (numberp score) (or (null best) (> score best)))
-                       (setq best score)))
-                   scores)
-          best)))))
-
-(defun llm-pick-source--fixture-prices (model)
-  "Return the :in and :out price plist of a parsed JSON MODEL, or nil."
-  (let ((pricing (llm-pick-source--json-field model "pricing")))
-    (when (hash-table-p pricing)
-      (let ((in (gethash "prompt" pricing))
-            (out (gethash "completion" pricing)))
-        (when (or (numberp in) (numberp out))
-          (list :in in :out out))))))
-
-(defun llm-pick-source--fixture-entry (model kind category)
-  "Convert one parsed JSON MODEL into a source entry for a source of KIND.
-CATEGORY selects the capability score to use, see
-`llm-pick-source--fixture-score'."
-  (let ((id (or (llm-pick-source--json-field model "id")
-                (llm-pick-source--json-field model "model"))))
-    (when id
-      (append (list :id id
-                    :display-name (or (llm-pick-source--json-field model "name") id)
-                    :providers (llm-pick-source--provider-ids model))
-              (when (memq kind '(capability both))
-                (let ((score (llm-pick-source--fixture-score model category)))
-                  (when (numberp score)
-                    (list :score score :category category))))
-              (when (memq kind '(price both))
-                (let ((prices (llm-pick-source--fixture-prices model)))
-                  (when prices (list :prices prices))))))))
-
-(defun llm-pick-source--fixture-loader (options)
-  "Return the entries stored in the snapshot(s) named in OPTIONS.
-OPTIONS is a plist with :kind, :category and :fixture.  See the
-Commentary of `llm-pick-source' for the snapshot layout.  :fixture may
-be a single value or a list of values; each value is either inline
-JSON text (a string starting with \"{\"), parsed directly with
-`llm-pick-core--parse-json', or a .json file name resolved relative
-to `llm-pick-source-fixture-directory'.  The resulting entry lists are
-appended."
-  (let ((fixture (plist-get options :fixture)))
-    (unless (or (stringp fixture) (listp fixture))
-      (signal 'llm-pick-error
-              (list (format "Invalid :fixture value: %S" fixture))))
-    (let ((sources (if (stringp fixture)
-                       (list fixture)
-                     fixture)))
-      (apply #'append
-             (mapcar
-              (lambda (source)
-                (let* ((inline (and (stringp source)
-                                    (string-prefix-p "{" source)))
-                       (data (if inline
-                                 (llm-pick-core--parse-json source)
-                               (llm-pick-source--read-json
-                                (expand-file-name
-                                 source llm-pick-source-fixture-directory))))
-                       (models (gethash "models" data))
-                       (origin (if inline
-                                   "inline JSON"
-                                 (format "file %s" source))))
-                  (unless (listp models)
-                    (signal 'llm-pick-error
-                            (list (format "Snapshot from %s has no \"models\" array"
-                                          origin))))
-                  (cl-loop for model in models
-                           for entry = (llm-pick-source--fixture-entry
-                                        model (plist-get options :kind)
-                                        (plist-get options :category))
-                           when entry collect entry)))
-              sources)))))
 
 ;;; Service loaders
 
@@ -478,38 +342,20 @@ model without a score."
     (mapcar #'llm-pick-core--category-name categories)))
 
 (defun llm-pick-source--loader (name descriptor)
-  "Return the loader function for the data of source NAME.
-A nil `llm-pick-source-offline' prefers the :fetcher of DESCRIPTOR, which reads
-the service; otherwise, and for a source without one, the :loader reads
-the offline snapshot.  A list-valued :fetcher means several fetchers whose
-entry lists are appended in order.  The built-in sources carry a :fetcher
-only, so offline collection needs a snapshot registered for the name.
-Signal `llm-pick-error' when the preferred loader is missing, naming the
-source and what is missing -- an offline snapshot for the name when
-`llm-pick-source-offline' is non-nil, a :fetcher otherwise -- and point at
-`llm-pick-source-register'."
-  (let ((fetcher (plist-get descriptor :fetcher))
-        (loader (plist-get descriptor :loader)))
-    (if llm-pick-source-offline
-        (or loader
-            (signal 'llm-pick-error
-                    (list (format "Source %S has no offline snapshot; see `llm-pick-source-register'"
-                                  name))))
-      (or (and fetcher loader) fetcher loader)
-      (cond
-       ((and (listp fetcher) (functionp fetcher)
-             (not (functionp (car fetcher))))
-        ;; Ambiguous; treat as a single function object.
-        fetcher)
-       ((and (consp fetcher) (not (functionp fetcher)))
-        (lambda (options)
-          (apply #'append
-                 (mapcar (lambda (f) (funcall f options)) fetcher))))
-       (fetcher)
-       (loader)
-       (t (signal 'llm-pick-error
-                  (list (format "Source %S has no :fetcher; see `llm-pick-source-register'"
-                                name))))))))
+  "Return the fetcher function for source NAME, read from its DESCRIPTOR.
+A list-valued :fetcher means several fetchers whose entry lists are
+appended in order.  Signal `llm-pick-error' when the source lacks
+a :fetcher."
+  (let ((fetcher (plist-get descriptor :fetcher)))
+    (cond
+     ((functionp fetcher) fetcher)
+     ((and (consp fetcher) (not (functionp fetcher)))
+      (lambda (options)
+        (apply #'append
+               (mapcar (lambda (f) (funcall f options)) fetcher))))
+     (t (signal 'llm-pick-error
+                (list (format "Source %S has no :fetcher; see `llm-pick-source-register'"
+                              name)))))))
 
 (defun llm-pick-source--collect-source (name options)
   "Return the entries of source NAME, loaded with OPTIONS."
@@ -520,8 +366,6 @@ source and what is missing -- an offline snapshot for the name when
       (funcall loader
                (append (list :source name
                              :kind (plist-get descriptor :kind))
-                       (when (eq loader (plist-get descriptor :loader))
-                         (list :fixture (llm-pick-source--fixture name)))
                        options)))))
 
 (defun llm-pick-source--collect-anchor (names anchor)

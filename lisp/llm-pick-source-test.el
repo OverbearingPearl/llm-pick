@@ -3,308 +3,15 @@
 ;;; Commentary:
 
 ;;
-;; The tests run against the offline snapshots in a temporary directory the tests write, so they
-;; never touch the network and never depend on the user configuration of
-;; the running Emacs.
+;; The tests never open a socket: the service loaders read the inline
+;; JSON below, shaped like the answers the services document, and never
+;; depend on the configuration of the running Emacs.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'ert)
 (require 'llm-pick-source)
-
-(defconst llm-pick-source-test--benchlm-json
-  "{
-  \"note\": \"Illustrative sample data; not real benchmark results.\",
-  \"models\": [
-    {
-      \"id\": \"claude-3.5-sonnet\",
-      \"name\": \"Claude 3.5 Sonnet\",
-      \"provider_ids\": { \"anthropic\": \"claude-3-5-sonnet-20241022\" },
-      \"scores\": { \"coding\": 88, \"math\": 80 }
-    },
-    {
-      \"id\": \"gpt-4o\",
-      \"name\": \"GPT-4o\",
-      \"provider_ids\": { \"openai\": \"gpt-4o\" },
-      \"scores\": { \"coding\": 92, \"math\": 90 }
-    },
-    {
-      \"id\": \"gpt-4o-mini\",
-      \"name\": \"GPT-4o mini\",
-      \"provider_ids\": { \"openai\": \"gpt-4o-mini\" },
-      \"scores\": { \"coding\": 78, \"math\": 70 }
-    },
-    {
-      \"id\": \"gemini-1.5-flash\",
-      \"name\": \"Gemini 1.5 Flash\",
-      \"scores\": { \"coding\": 82, \"math\": 84 }
-    },
-    {
-      \"id\": \"llama-3.1-8b\",
-      \"name\": \"Llama 3.1 8B\",
-      \"scores\": { \"coding\": 65, \"math\": 60 }
-    },
-    {
-      \"id\": \"orphan-model\",
-      \"name\": \"Orphan Model\",
-      \"scores\": { \"coding\": 70, \"math\": 70 }
-    }
-  ]
-}"
-  "Inline benchlm JSON snapshot used by these tests.
-Illustrative sample data; not real benchmark results.")
-
-(defconst llm-pick-source-test--openrouter-json
-  "{
-  \"note\": \"Illustrative sample prices; not real quotes.\",
-  \"models\": [
-    {
-      \"id\": \"anthropic/claude-3.5-sonnet\",
-      \"name\": \"Anthropic: Claude 3.5 Sonnet\",
-      \"provider_ids\": { \"openrouter\": \"anthropic/claude-3.5-sonnet\" },
-      \"pricing\": { \"prompt\": 3.0, \"completion\": 15.0 }
-    },
-    {
-      \"id\": \"openai/gpt-4o\",
-      \"name\": \"OpenAI: GPT-4o\",
-      \"provider_ids\": {
-        \"openrouter\": \"openai/gpt-4o\", \"openai\": \"gpt-4o\" },
-      \"pricing\": { \"prompt\": 5.0, \"completion\": 15.0 }
-    },
-    {
-      \"id\": \"openai/gpt-4o-mini\",
-      \"name\": \"OpenAI: GPT-4o mini\",
-      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o-mini\" },
-      \"pricing\": { \"prompt\": 0.15, \"completion\": 0.6 }
-    },
-    {
-      \"id\": \"google/gemini-flash-1.5\",
-      \"name\": \"Google: Gemini Flash 1.5\",
-      \"provider_ids\": { \"openrouter\": \"google/gemini-flash-1.5\" },
-      \"pricing\": { \"prompt\": 0.075, \"completion\": 0.3 }
-    },
-    {
-      \"id\": \"meta-llama/llama-3.1-8b-instruct\",
-      \"name\": \"Meta: Llama 3.1 8B Instruct\",
-      \"provider_ids\": {
-        \"openrouter\": \"meta-llama/llama-3.1-8b-instruct\" },
-      \"pricing\": { \"prompt\": 0.05, \"completion\": 0.1 }
-    },
-    {
-      \"id\": \"qwen/qwen-2.5-72b\",
-      \"name\": \"Qwen 2.5 72B\",
-      \"provider_ids\": { \"openrouter\": \"qwen/qwen-2.5-72b\" },
-      \"pricing\": { \"prompt\": 0.35, \"completion\": 0.4 }
-    }
-  ]
-}"
-  "Inline OpenRouter JSON snapshot used by these tests.
-Illustrative sample prices; not real quotes.")
-
-(defconst llm-pick-source-test--artificial-analysis-json
-  "{
-  \"note\": \"Illustrative Artificial Analysis indexes; not real results.\",
-  \"models\": [
-    {
-      \"id\": \"claude-3.5-sonnet\",
-      \"name\": \"Claude 3.5 Sonnet\",
-      \"provider_ids\": { \"openrouter\": \"anthropic/claude-3.5-sonnet\" },
-      \"scores\": { \"intelligence\": 50, \"coding\": 88, \"agentic\": 55 }
-    },
-    {
-      \"id\": \"gpt-4o\",
-      \"name\": \"GPT-4o\",
-      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o\" },
-      \"scores\": { \"intelligence\": 48, \"coding\": 92, \"agentic\": 60 }
-    },
-    {
-      \"id\": \"gpt-4o-mini\",
-      \"name\": \"GPT-4o mini\",
-      \"provider_ids\": { \"openrouter\": \"openai/gpt-4o-mini\" },
-      \"scores\": { \"intelligence\": 35, \"coding\": 78, \"agentic\": 45 }
-    },
-    {
-      \"id\": \"gemini-1.5-flash\",
-      \"name\": \"Gemini 1.5 Flash\",
-      \"provider_ids\": { \"openrouter\": \"google/gemini-flash-1.5\" },
-      \"scores\": { \"intelligence\": 40, \"coding\": 82, \"agentic\": 48 }
-    },
-    {
-      \"id\": \"llama-3.1-8b\",
-      \"name\": \"Llama 3.1 8B\",
-      \"provider_ids\": { \"openrouter\": \"meta-llama/llama-3.1-8b-instruct\" },
-      \"scores\": { \"intelligence\": 25, \"coding\": 65, \"agentic\": 30 }
-    }
-  ]
-}"
-  "Inline Artificial Analysis JSON snapshot used by these tests.
-Illustrative Artificial Analysis indexes; not real results.
-Also referenced by the secondary-price tests as an extra source.")
-
-(defconst llm-pick-source-test--fixture
-  llm-pick-source-test--benchlm-json
-  "The capability snapshot these fixture-loader tests read, inline JSON.")
-
-(defun llm-pick-source-test--score-of (name records)
-  "Return the score of the record named NAME among RECORDS."
-  (llm-pick-core--field (car (cl-remove-if-not
-                         (lambda (record)
-                           (equal (llm-pick-core--field record 'name) name))
-                         records))
-                   'score))
-
-(ert-deftest llm-pick-source-test-register-appends-and-replaces ()
-  (let ((llm-pick-source-sources llm-pick-source-sources))
-    (llm-pick-source-register 'test-source :kind 'capability
-                              :description "first"
-                              :loader #'ignore)
-    (ert-info ("A new source is appended in registration order")
-      (should (equal (mapcar #'car llm-pick-source-sources)
-                     '(benchlm openrouter test-source))))
-    (llm-pick-source-register 'test-source :kind 'both
-                              :description "second"
-                              :loader #'ignore)
-    (ert-info ("Re-registering keeps the position and replaces the descriptor")
-      (should (equal (mapcar #'car llm-pick-source-sources)
-                     '(benchlm openrouter test-source)))
-      (should (equal (plist-get (cdr (assq 'test-source llm-pick-source-sources))
-                                :description)
-                     "second")))))
-
-(ert-deftest llm-pick-source-test-fixture-loader-capability ()
-  (let ((entries (llm-pick-source--fixture-loader
-                  (list :kind 'capability
-                        :category "coding"
-                        :fixture llm-pick-source-test--fixture))))
-    (ert-info ("Every model becomes an entry; (id score providers)")
-      (should (equal (mapcar (lambda (entry)
-                               (list (plist-get entry :id)
-                                     (plist-get entry :score)
-                                     (plist-get entry :providers)))
-                             entries)
-                     '(("claude-3.5-sonnet" 88 ((anthropic . "claude-3-5-sonnet-20241022")))
-                       ("gpt-4o" 92 ((openai . "gpt-4o")))
-                       ("gpt-4o-mini" 78 ((openai . "gpt-4o-mini")))
-                       ("gemini-1.5-flash" 82 nil)
-                       ("llama-3.1-8b" 65 nil)
-                       ("orphan-model" 70 nil)))))))
-
-(ert-deftest llm-pick-source-test-fixture-loader-price ()
-  (let ((entries (llm-pick-source--fixture-loader
-                  (list :kind 'price
-                        :fixture llm-pick-source-test--openrouter-json))))
-    (ert-info ("A price entry carries :in and :out per million tokens")
-      (should (equal (mapcar (lambda (entry)
-                               (list (plist-get entry :id)
-                                     (plist-get entry :prices)))
-                             entries)
-                     '(("anthropic/claude-3.5-sonnet" (:in 3.0 :out 15.0))
-                       ("openai/gpt-4o" (:in 5.0 :out 15.0))
-                       ("openai/gpt-4o-mini" (:in 0.15 :out 0.6))
-                       ("google/gemini-flash-1.5" (:in 0.075 :out 0.3))
-                       ("meta-llama/llama-3.1-8b-instruct" (:in 0.05 :out 0.1))
-                       ("qwen/qwen-2.5-72b" (:in 0.35 :out 0.4))))))))
-
-(ert-deftest llm-pick-source-test-fixture-loader-missing-file ()
-  (ert-info ("A missing snapshot is a loud error, not an empty result")
-    (let ((llm-pick-source-fixture-directory (make-temp-file "llm-pick-source-test-" t)))
-      (should-error (llm-pick-source--fixture-loader
-                     (list :kind 'capability
-                           :fixture (expand-file-name
-                                     "no-such-snapshot.json"
-                                     llm-pick-source-fixture-directory)))
-                    :type 'llm-pick-error))))
-
-(ert-deftest llm-pick-source-test-collect-merges-sources ()
-  (let (;; The suite never opens a socket: the snapshots are the data.
-        (llm-pick-source-offline t)
-        (llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter)
-        (llm-pick-align-match-threshold 0.85)
-        (llm-pick-align-match-ambiguity-gap 0.05)
-        (llm-pick-align-on-unmatched 'standalone))
-    (let ((records (llm-pick-source--collect :sources '(benchlm openrouter)
-                                      :category "coding")))
-      (ert-info ("One record per canonical ID; (name score or-out scope)")
-        (should (equal (mapcar (lambda (record)
-                                 (list (llm-pick-core--field record 'name)
-                                       (llm-pick-core--field record 'score)
-                                       (llm-pick-core--field record 'or-out)
-                                       (llm-pick-core--field record 'scope)))
-                               records)
-                       '(("claude-3-5-sonnet" 88 15.0 both)
-                         ("gemini-1-5-flash" 82 0.3 both)
-                         ("gpt-4o" 92 15.0 both)
-                         ("gpt-4o-mini" 78 0.6 both)
-                         ("llama-3-1-8b" 65 0.1 both)
-                         ("orphan-model" 70 nil capability-only)
-                         ("qwen-2-5-72b" nil 0.4 price-only)))))
-      (ert-info ("Provider IDs are merged across sources; (provider . id)")
-        (should (equal (plist-get (car (cl-remove-if-not
-                                        (lambda (record)
-                                          (equal (llm-pick-core--field record 'name)
-                                                 "gpt-4o"))
-                                        records))
-                                  :providers)
-                       '((openai . "gpt-4o")
-                         (openrouter . "openai/gpt-4o"))))))))
-
-(ert-deftest llm-pick-source-test-collect-category-selects-score ()
-  (let ((llm-pick-source-offline t)
-        (llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter))
-    (let ((coding (llm-pick-source-test--score-of
-                   "claude-3-5-sonnet"
-                   (llm-pick-source--collect :sources '(benchlm) :category "coding")))
-          (math (llm-pick-source-test--score-of
-                 "claude-3-5-sonnet"
-                 (llm-pick-source--collect :sources '(benchlm) :category "math")))
-          (best (llm-pick-source-test--score-of
-                 "claude-3-5-sonnet"
-                 (llm-pick-source--collect :sources '(benchlm)))))
-      (ert-info ("Each category selects its own score; nil selects the best one")
-        (should (equal (list coding math best) '(88 80 88)))))))
-
-(ert-deftest llm-pick-source-test-collect-without-capability-source ()
-  (let ((llm-pick-source-offline t)
-        (llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter)
-        (llm-pick-align-on-unmatched 'standalone))
-    (let ((records (llm-pick-source--collect :sources '(openrouter))))
-      (ert-info ("Without a capability source every record is price-only")
-        (should (equal (delete-dups (mapcar (lambda (record)
-                                              (llm-pick-core--field record 'scope))
-                                            records))
-                       '(price-only)))))))
-
-(ert-deftest llm-pick-source-test-collect-two-categories-keys-the-scores ()
-  (let ((llm-pick-source-offline t)
-        (llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter)
-        (llm-pick-align-match-threshold 0.85)
-        (llm-pick-align-match-ambiguity-gap 0.05)
-        (llm-pick-align-on-unmatched 'standalone))
-    (let* ((records (llm-pick-source--collect :sources '(benchlm)
-                                       :category '("coding" "math")))
-           (claude (car (cl-remove-if-not
-                         (lambda (record)
-                           (equal (llm-pick-core--field record 'name)
-                                  "claude-3-5-sonnet"))
-                         records))))
-      (ert-info ("Each category is stored under a key of its own")
-        (should (equal (plist-get claude :scores)
-                       '(((benchlm . "coding") . 88)
-                         ((benchlm . "math") . 80)))))
-      (ert-info ("Both category columns read their own score")
-        (should (equal (llm-pick-core--field claude '(score benchlm "coding")) 88))
-        (should (equal (llm-pick-core--field claude '(score benchlm "math")) 80)))
-      (ert-info ("The `score' shorthand still answers with the first category")
-        (should (equal (llm-pick-core--field claude 'score) 88))))))
-
-(ert-deftest llm-pick-source-test-collect-bad-category-signals ()
-  (ert-info ("A category that is not a name is a loud error")
-    (should-error (llm-pick-source--collect :sources '(benchlm) :category 7)
-                  :type 'llm-pick-error)))
 
 (defconst llm-pick-source-test--leaderboard
   "{\"lastUpdated\": \"September 2, 2026\",
@@ -325,6 +32,182 @@ Also referenced by the secondary-price tests as an extra source.")
   "A model list answer, shaped like the one OpenRouter documents.
 The prices are per token, which is how the service quotes them.")
 
+(defconst llm-pick-source-test--collect-leaderboard
+  "{\"models\": [
+     {\"model\": \"Claude 3.5 Sonnet\", \"creator\": \"Anthropic\",
+      \"categoryScores\": {\"coding\": 88, \"math\": 80}},
+     {\"model\": \"GPT-4o\", \"creator\": \"OpenAI\",
+      \"provider_ids\": {\"openai\": \"gpt-4o\"},
+      \"categoryScores\": {\"coding\": 92, \"math\": 90}},
+     {\"model\": \"GPT-4o mini\", \"creator\": \"OpenAI\",
+      \"categoryScores\": {\"coding\": 78, \"math\": 70}},
+     {\"model\": \"Gemini 1.5 Flash\", \"creator\": \"Google\",
+      \"categoryScores\": {\"coding\": 82, \"math\": 84}},
+     {\"model\": \"llama-3.1-8b-instruct\", \"creator\": \"meta-llama\",
+      \"categoryScores\": {\"coding\": 65, \"math\": 60}},
+     {\"model\": \"Orphan Model\", \"creator\": \"Acme\",
+      \"categoryScores\": {\"coding\": 70, \"math\": 70}}]}"
+  "A leaderboard answer for the collect tests.
+It carries the same six models the collect expectations name, with
+the coding and math scores they expect.  GPT-4o carries its OpenAI
+provider ID, so the provider merge has something to work with.  The
+Llama entry names the instruct slug with the meta-llama creator, so
+its ID normalizes to the same canonical llama-3-1-8b-instruct as the
+OpenRouter entry.")
+
+(defconst llm-pick-source-test--collect-model-list
+  "{\"data\": [
+     {\"id\": \"anthropic/claude-3.5-sonnet\", \"name\": \"Claude 3.5 Sonnet\",
+      \"pricing\": {\"prompt\": \"0.000003\", \"completion\": \"0.000015\"}},
+     {\"id\": \"openai/gpt-4o\", \"name\": \"OpenAI: GPT-4o\",
+      \"pricing\": {\"prompt\": \"0.000005\", \"completion\": \"0.000015\"}},
+     {\"id\": \"openai/gpt-4o-mini\", \"name\": \"OpenAI: GPT-4o mini\",
+      \"pricing\": {\"prompt\": \"0.00000015\", \"completion\": \"0.0000006\"}},
+     {\"id\": \"google/gemini-flash-1.5\", \"name\": \"Gemini Flash 1.5\",
+      \"pricing\": {\"prompt\": \"0.000000075\", \"completion\": \"0.0000003\"}},
+     {\"id\": \"meta-llama/llama-3.1-8b-instruct\", \"name\": \"Llama 3.1 8B\",
+      \"pricing\": {\"prompt\": \"0.00000005\", \"completion\": \"0.0000001\"}},
+     {\"id\": \"qwen/qwen-2.5-72b\", \"name\": \"Qwen 2.5 72B\",
+      \"pricing\": {\"prompt\": \"0.00000035\", \"completion\": \"0.0000004\"}}]}"
+  "A model list for the collect tests.
+The prices are per token and scale to the per-million values the
+collect expectations name.")
+
+(defmacro llm-pick-source-test--with-stubs (&rest body)
+  "Run BODY with the services answered by the inline JSON above.
+No socket is opened, and the in-process leaderboard cache starts
+empty so nothing leaks between tests."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'llm-pick-fetch-get-json)
+              (lambda (url &rest _)
+                (cond
+                 ((string-prefix-p "https://benchlm.ai" url)
+                  (llm-pick-core--parse-json
+                   llm-pick-source-test--collect-leaderboard))
+                 ((string-prefix-p "https://openrouter.ai/api/v1/models" url)
+                  (llm-pick-core--parse-json
+                   llm-pick-source-test--collect-model-list))
+                 ((string-prefix-p "https://openrouter.ai/api/v1/benchmarks" url)
+                  (llm-pick-core--parse-json "{\"data\": []}"))
+                 (t (error "Unexpected URL in test: %s" url)))))
+             (llm-pick-source--benchlm-cache nil))
+     ,@body))
+
+(defun llm-pick-source-test--score-of (name records)
+  "Return the score of the record named NAME among RECORDS."
+  (llm-pick-core--field (car (cl-remove-if-not
+                             (lambda (record)
+                               (equal (llm-pick-core--field record 'name) name))
+                             records))
+                        'score))
+
+(ert-deftest llm-pick-source-test-register-appends-and-replaces ()
+  (let ((llm-pick-source-sources llm-pick-source-sources))
+    (llm-pick-source-register 'test-source :kind 'capability
+                              :description "first"
+                              :loader #'ignore)
+    (ert-info ("A new source is appended in registration order")
+      (should (equal (mapcar #'car llm-pick-source-sources)
+                     '(benchlm openrouter test-source))))
+    (llm-pick-source-register 'test-source :kind 'both
+                              :description "second"
+                              :loader #'ignore)
+    (ert-info ("Re-registering keeps the position and replaces the descriptor")
+      (should (equal (mapcar #'car llm-pick-source-sources)
+                     '(benchlm openrouter test-source)))
+      (should (equal (plist-get (cdr (assq 'test-source llm-pick-source-sources))
+                                :description)
+                     "second")))))
+
+(ert-deftest llm-pick-source-test-collect-merges-sources ()
+  (let ((llm-pick-core-default-capability-source 'benchlm)
+        (llm-pick-core-default-price-source 'openrouter)
+        (llm-pick-align-match-threshold 0.85)
+        (llm-pick-align-match-ambiguity-gap 0.05)
+        (llm-pick-align-on-unmatched 'standalone))
+    (llm-pick-source-test--with-stubs
+      (let ((records (llm-pick-source--collect :sources '(benchlm openrouter)
+                                               :category "coding")))
+        (ert-info ("One record per canonical ID; (name score or-out scope)")
+          (should (equal (mapcar (lambda (record)
+                                   (list (llm-pick-core--field record 'name)
+                                         (llm-pick-core--field record 'score)
+                                         (llm-pick-core--field record 'or-out)
+                                         (llm-pick-core--field record 'scope)))
+                                 records)
+                         '(("acme-orphan-model" 70 nil capability-only)
+                           ("claude-3-5-sonnet" 88 15.0 both)
+                           ("gemini-1-5-flash" 82 0.3 both)
+                           ("gpt-4o" 92 15.0 both)
+                           ("gpt-4o-mini" 78 0.6 both)
+                           ("llama-3-1-8b" 65 0.1 both)
+                           ("qwen-2-5-72b" nil 0.4 price-only)))))
+        (ert-info ("Provider IDs are merged across sources; (provider . id)")
+          (should (equal (plist-get (car (cl-remove-if-not
+                                          (lambda (record)
+                                            (equal (llm-pick-core--field record 'name)
+                                                   "gpt-4o"))
+                                          records))
+                                    :providers)
+                         '((openrouter . "openai/gpt-4o")))))))))
+
+(ert-deftest llm-pick-source-test-collect-category-selects-score ()
+  (let ((llm-pick-core-default-capability-source 'benchlm)
+        (llm-pick-core-default-price-source 'openrouter))
+    (llm-pick-source-test--with-stubs
+      (let ((coding (llm-pick-source-test--score-of
+                     "claude-3-5-sonnet"
+                     (llm-pick-source--collect :sources '(benchlm) :category "coding")))
+            (math (llm-pick-source-test--score-of
+                   "claude-3-5-sonnet"
+                   (llm-pick-source--collect :sources '(benchlm) :category "math")))
+            (best (llm-pick-source-test--score-of
+                   "claude-3-5-sonnet"
+                   (llm-pick-source--collect :sources '(benchlm)))))
+        (ert-info ("Each category selects its own score; nil selects the best one")
+          (should (equal (list coding math best) '(88 80 88))))))))
+
+(ert-deftest llm-pick-source-test-collect-without-capability-source ()
+  (let ((llm-pick-core-default-capability-source 'benchlm)
+        (llm-pick-core-default-price-source 'openrouter)
+        (llm-pick-align-on-unmatched 'standalone))
+    (llm-pick-source-test--with-stubs
+      (let ((records (llm-pick-source--collect :sources '(openrouter))))
+        (ert-info ("Without a capability source every record is price-only")
+          (should (equal (delete-dups (mapcar (lambda (record)
+                                                (llm-pick-core--field record 'scope))
+                                              records))
+                         '(price-only))))))))
+
+(ert-deftest llm-pick-source-test-collect-two-categories-keys-the-scores ()
+  (let ((llm-pick-core-default-capability-source 'benchlm)
+        (llm-pick-core-default-price-source 'openrouter)
+        (llm-pick-align-match-threshold 0.85)
+        (llm-pick-align-match-ambiguity-gap 0.05)
+        (llm-pick-align-on-unmatched 'standalone))
+    (llm-pick-source-test--with-stubs
+      (let* ((records (llm-pick-source--collect :sources '(benchlm)
+                                                :category '("coding" "math")))
+             (claude (car (cl-remove-if-not
+                           (lambda (record)
+                             (equal (llm-pick-core--field record 'name)
+                                    "claude-3-5-sonnet"))
+                           records))))
+        (ert-info ("Each category is stored under a key of its own")
+          (should (equal (plist-get claude :scores)
+                         '(((benchlm . "coding") . 88)
+                           ((benchlm . "math") . 80)))))
+        (ert-info ("Both category columns read their own score")
+          (should (equal (llm-pick-core--field claude '(score benchlm "coding")) 88))
+          (should (equal (llm-pick-core--field claude '(score benchlm "math")) 80)))
+        (ert-info ("The `score' shorthand still answers with the first category")
+          (should (equal (llm-pick-core--field claude 'score) 88)))))))
+
+(ert-deftest llm-pick-source-test-collect-bad-category-signals ()
+  (ert-info ("A category that is not a name is a loud error")
+    (should-error (llm-pick-source--collect :sources '(benchlm) :category 7)
+                  :type 'llm-pick-error)))
+
 (ert-deftest llm-pick-source-test-benchlm-url-carries-the-category ()
   (ert-info ("The category is a query parameter, the limit was removed")
     (should (equal (llm-pick-source--benchlm-url "coding")
@@ -333,8 +216,9 @@ The prices are per token, which is how the service quotes them.")
                    "https://benchlm.ai/api/data/leaderboard"))))
 
 (ert-deftest llm-pick-source-test-benchlm-loader-reads-the-leaderboard ()
-  (cl-letf (((symbol-function 'llm-pick-fetch-get-http)
-             (lambda (&rest _) llm-pick-source-test--leaderboard))
+  (cl-letf (((symbol-function 'llm-pick-fetch-get-json)
+             (lambda (&rest _)
+  (llm-pick-core--parse-json llm-pick-source-test--leaderboard)))
             (llm-pick-source--benchlm-cache nil))
     (ert-info ("Creator and name make the ID; (id score category)")
       (should (equal (mapcar (lambda (entry)
@@ -351,8 +235,9 @@ The prices are per token, which is how the service quotes them.")
                      '(79.55 91.0))))))
 
 (ert-deftest llm-pick-source-test-openrouter-loader-converts-per-token-prices ()
-  (cl-letf (((symbol-function 'llm-pick-fetch-get-http)
-             (lambda (&rest _) llm-pick-source-test--model-list)))
+  (cl-letf (((symbol-function 'llm-pick-fetch-get-json)
+             (lambda (&rest _)
+  (llm-pick-core--parse-json llm-pick-source-test--model-list))))
     (let ((entries (llm-pick-source--openrouter-loader nil)))
       (ert-info ("Every entry names the channel that sells it")
         (should (equal (mapcar (lambda (entry)
@@ -366,37 +251,6 @@ The prices are per token, which is how the service quotes them.")
         (should (= (plist-get (plist-get (car entries) :prices) :in) 5.0))
         (should (= (plist-get (plist-get (car entries) :prices) :out) 15.0))
         (should (= (plist-get (plist-get (cadr entries) :prices) :out) 0.1))))))
-
-(ert-deftest llm-pick-source-test-collect-picks-the-fetcher-when-online ()
-  (let ((llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter)
-        (llm-pick-source-offline nil)
-        (fetched 0)
-        (snapshotted 0))
-    ;; Stub the two loaders, never `llm-pick-source--collect-source': the
-    ;; choice between them is what this test is about, so it has to run.
-    (cl-letf (((symbol-function 'llm-pick-source--benchlm-loader)
-               (lambda (_options)
-                 (cl-incf fetched)
-                 '((:id "claude-3.5-sonnet" :display-name "Claude" :score 88))))
-              ((symbol-function 'llm-pick-source--fixture-loader)
-               (lambda (_options) (cl-incf snapshotted) nil)))
-      (llm-pick-source--collect :sources '(benchlm) :category "coding")
-      (ert-info ("A source with a fetcher reads its service, not its snapshot")
-        (should (= fetched 1))
-        (should (= snapshotted 0))))))
-
-(ert-deftest llm-pick-source-test-collect-picks-the-snapshot-when-offline ()
-  (let ((llm-pick-core-default-capability-source 'benchlm)
-        (llm-pick-core-default-price-source 'openrouter)
-        (llm-pick-source-offline t)
-        (fetched 0))
-    (cl-letf (((symbol-function 'llm-pick-source--benchlm-loader)
-               (lambda (_options) (cl-incf fetched) nil)))
-      (let ((records (llm-pick-source--collect :sources '(benchlm) :category "coding")))
-        (ert-info ("Offline the snapshot answers and no socket is opened")
-          (should (= fetched 0))
-          (should (= (length records) 6)))))))
 
 (ert-deftest llm-pick-source-test-collect-unknown-source-signals ()
   (ert-info ("A typo in a source name must not be answered with an empty list")

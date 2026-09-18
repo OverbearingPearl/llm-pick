@@ -168,37 +168,17 @@ now."
     (dolist (file (llm-pick-test--test-files))
       (load-file file))))
 
-(defun llm-pick-test--register-sources ()
-  "Register the sources used by the test suite.
-
-The snapshots live in `llm-pick-fixture-test' as inline JSON, so this
-function only needs to load that library, which registers the sources
-themselves."
-  (require 'llm-pick-fixture-test)
-  nil)
-
 (defun llm-pick-test-run ()
   "Reload the modules and run the whole `llm-pick' test suite."
   (interactive)
   (let ((dir default-directory))
     (llm-pick-test--reload)
-    ;; The built-in sources read their service only, so the suite registers
-    ;; the snapshot-backed ones before anything runs.
-    (llm-pick-test--register-sources)
-    ;; The suite must not open a socket.  Every test that collects binds
-    ;; `llm-pick-source-offline' itself and this binding is the net under the test
-    ;; that forgets: a run that reaches a service is slow, is not
-    ;; reproducible, and blocked this command outright once.
-    (let ((llm-pick-source-offline t))
-      (when (get-buffer "*ert*")
-        (kill-buffer "*ert*"))
-      (let ((default-directory dir))
-        (if noninteractive
-            (ert-run-tests-batch-and-exit "llm-pick-")
-          (ert "llm-pick-")))
-      ;; The fixture descriptors registered above survive the run and would
-      ;; pollute the user session, so reload the built-in registrations.
-      (load (expand-file-name "lisp/llm-pick-source.el" llm-pick-test--root) nil t))))
+    (when (get-buffer "*ert*")
+      (kill-buffer "*ert*"))
+    (let ((default-directory dir))
+      (if noninteractive
+          (ert-run-tests-batch-and-exit "llm-pick-")
+        (ert "llm-pick-")))))
 
 (provide 'llm-pick-test)
 

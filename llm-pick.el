@@ -113,22 +113,6 @@
   :group 'tools
   :prefix "llm-pick-")
 
-(defcustom llm-pick-source-fixture-directory
-  nil
-  "Directory holding the offline snapshots of the registered sources.
-A descriptor names its snapshot with :fixture and the name is looked up here;
-nil means no snapshot can be read, the built-in sources being service-only."
-  :type '(choice (const :tag "None" nil)
-                 directory))
-
-(defcustom llm-pick-source-offline nil
-  "Whether the built-in sources read their offline snapshots.
-Nil, the default, reads the service of every source that has a fetcher
-and caches the answer in `llm-pick-cache-dir'.  A non-nil value reads
-`llm-pick-source-fixture-directory' instead and opens no socket, which
-is what the test suite binds."
-  :type 'boolean)
-
 (defcustom llm-pick-source-openrouter-api-key nil
   "Bearer token sent with the OpenRouter request.
 Nil, the default, falls back to the OPENROUTER_API_KEY environment

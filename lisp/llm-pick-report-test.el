@@ -27,8 +27,17 @@
   (cons 'bedrock
         '(:kind price
           :description "Second channel, registered by this test only"
-          :loader llm-pick-source--fixture-loader
-          :fixture "{\"models\":[{\"id\":\"claude-3.5-sonnet\",\"pricing\":{\"prompt\":3.0,\"completion\":12.0}},{\"id\":\"gpt-4o\",\"pricing\":{\"prompt\":4.0,\"completion\":12.0}},{\"id\":\"gpt-4o-mini\",\"pricing\":{\"prompt\":0.2,\"completion\":0.7}},{\"id\":\"gemini-1.5-flash\",\"pricing\":{\"prompt\":0.08,\"completion\":0.3}},{\"id\":\"llama-3.1-8b\",\"pricing\":{\"prompt\":0.04,\"completion\":0.08}}]}"))
+          :fetcher (lambda (_options)
+                     (cl-loop for (id in out) in
+                              '(("claude-3.5-sonnet" 3.0 12.0)
+                                ("gpt-4o" 4.0 12.0)
+                                ("gpt-4o-mini" 0.2 0.7)
+                                ("gemini-1.5-flash" 0.08 0.3)
+                                ("llama-3.1-8b" 0.04 0.08))
+                              collect (list :id id
+                                            :display-name id
+                                            :providers nil
+                                            :prices (list :in in :out out))))))
   "A second price source, registered inside one test and nowhere else.")
 
 (defconst llm-pick-report-test--coding-budget
@@ -49,19 +58,54 @@ The bars scale against the best model of the report, 82, so the first
 bar is full and a model without a score keeps an empty one.")
 
 (defmacro llm-pick-report-test--with-fixtures (&rest body)
-  "Run BODY with the options the fixture reports depend on bound."
+  "Run BODY with the service loaders stubbed to inline JSON.
+Also bind the options the expected reports depend on."
   (declare (indent 0))
-  `(let (;; The suite never opens a socket: the snapshots are the data.
-         (llm-pick-source-offline t)
-         (llm-pick-core-default-capability-source 'benchlm)
-         (llm-pick-core-default-price-source 'openrouter)
-         (llm-pick-report-columns '(name bar score or-out))
-         (llm-pick-report-ladder-bounds '(0.5 1 2 5 nil))
-         (llm-pick-render-report-default-bar-width 30)
-         (llm-pick-align-match-threshold 0.85)
-         (llm-pick-align-match-ambiguity-gap 0.05)
-         (llm-pick-align-on-unmatched 'standalone))
-     ,@body))
+  `(cl-letf (((symbol-function 'llm-pick-source--benchlm-loader)
+              (lambda (_options)
+                (cl-loop for (id name score providers) in
+                         '(("claude-3.5-sonnet" "Claude 3.5 Sonnet" 88
+                            ((anthropic . "claude-3-5-sonnet-20241022")))
+                           ("gpt-4o" "GPT-4o" 92 ((openai . "gpt-4o")))
+                           ("gpt-4o-mini" "GPT-4o mini" 78 nil)
+                           ("gemini-1.5-flash" "Gemini 1.5 Flash" 82 nil)
+                           ("llama-3.1-8b" "Llama 3.1 8B" 65 nil)
+                           ("orphan-model" "Orphan Model" 70 nil))
+                         collect (list :id id :display-name name
+                                       :providers providers
+                                       :score score :category nil))))
+             ((symbol-function 'llm-pick-source--openrouter-loader)
+              (lambda (_options)
+                (cl-loop for (id in out providers) in
+                         '(("anthropic/claude-3.5-sonnet" 3.0 15.0
+                            ((openrouter . "anthropic/claude-3.5-sonnet")))
+                           ("openai/gpt-4o" 5.0 15.0
+                            ((openai . "gpt-4o")
+                             (openrouter . "openai/gpt-4o")))
+                           ("openai/gpt-4o-mini" 0.15 0.6
+                            ((openai . "gpt-4o-mini")
+                             (openrouter . "openai/gpt-4o-mini")))
+                           ("google/gemini-flash-1.5" 0.075 0.3
+                            ((openrouter . "google/gemini-flash-1.5")))
+                           ("meta-llama/llama-3.1-8b-instruct" 0.05 0.1
+                            ((openrouter . "meta-llama/llama-3.1-8b-instruct")))
+                           ("qwen/qwen-2.5-72b" 0.35 0.4
+                            ((openrouter . "qwen/qwen-2.5-72b"))))
+                         collect (list :id id :display-name id
+                                       :providers providers
+                                       :prices (list :in in :out out)))))
+             ((symbol-function 'llm-pick-source--openrouter-benchmarks-loader)
+              (lambda (_options) nil)))
+    (let (;; The options the expected report texts depend on.
+          (llm-pick-core-default-capability-source 'benchlm)
+          (llm-pick-core-default-price-source 'openrouter)
+          (llm-pick-report-columns '(name bar score or-out))
+          (llm-pick-report-ladder-bounds '(0.5 1 2 5 nil))
+          (llm-pick-render-report-default-bar-width 30)
+          (llm-pick-align-match-threshold 0.85)
+          (llm-pick-align-match-ambiguity-gap 0.05)
+          (llm-pick-align-on-unmatched 'standalone))
+      ,@body)))
 
 (ert-deftest llm-pick-report-test-coding-budget-matches-the-fixtures ()
   (llm-pick-report-test--with-fixtures
@@ -313,9 +357,9 @@ bar is full and a model without a score keeps an empty one.")
     (let ((llm-pick-source-sources
            (list (cons 'benchlm
                        (list :kind 'capability
-                             :loader (lambda (_options)
-                                       '((:id "foo-bar" :score 80)
-                                         (:id "foo_bar" :score 70)))))))
+                             :fetcher (lambda (_options)
+                                        '((:id "foo-bar" :score 80)
+                                          (:id "foo_bar" :score 70)))))))
           (shown nil))
       (ert-info ("A plain collection stops at the conflict")
         (should-error (llm-pick-collect) :type 'llm-pick-align-conflict))
