@@ -174,12 +174,26 @@ The two price columns are, in order: the default price source,
 named by the variable llm-pick-core-default-price-source, and
 the secondary price source, named by the variable
 llm-pick-core-secondary-price-source.  Both names are resolved
-dynamically here since those variables live in llm-pick.el."
+dynamically here since those variables live in llm-pick.el.
+Price cells: nil renders as \"-\"; a 0 price from an openrouter
+source renders as \"free\"; a 0 price from any other source,
+including benchlm and nil, renders as \"-\" because 0 there
+means unknown; any other number is rendered with %g."
   (let* ((default-price (symbol-value 'llm-pick-core-default-price-source))
          (secondary-price (symbol-value 'llm-pick-core-secondary-price-source))
          (benchlm-categories '("agentic" "coding" "reasoning" "multimodalGrounded"
                                "knowledge" "multilingual" "instructionFollowing" "math"))
          (aa-categories '("intelligence" "coding" "agentic"))
+         (price-cell (lambda (price source width)
+                       (cond
+                        ((or (null price) (and (numberp price) (zerop price)
+                                               (not (eq source 'openrouter))))
+                         (format (concat "%" (number-to-string width) "s") "-"))
+                        ((and (numberp price) (zerop price))
+                         (format (concat "%" (number-to-string width) "s") "free"))
+                        (t
+                         (format (concat "%" (number-to-string width) "s")
+                                 (format "%g" price))))))
          (cells (append
                  (list (format "%-44s"
                                (or (plist-get record :display-name)
@@ -194,12 +208,20 @@ dynamically here since those variables live in llm-pick.el."
                     (llm-pick-view--num (llm-pick-core--score record 'openrouter cat) 9))
                   aa-categories)
                  (list (llm-pick-view--num (llm-pick-core--field record 'value) 9))
-                 (list (concat (llm-pick-view--num (llm-pick-core--price record default-price 'in) 6)
+                 (list (concat (funcall price-cell
+                                        (llm-pick-core--price record default-price 'in)
+                                        default-price 6)
                                " "
-                               (llm-pick-view--num (llm-pick-core--price record default-price 'out) 7)))
-                 (list (concat (llm-pick-view--num (llm-pick-core--price record secondary-price 'in) 6)
+                               (funcall price-cell
+                                        (llm-pick-core--price record default-price 'out)
+                                        default-price 7)))
+                 (list (concat (funcall price-cell
+                                        (llm-pick-core--price record secondary-price 'in)
+                                        secondary-price 6)
                                " "
-                               (llm-pick-view--num (llm-pick-core--price record secondary-price 'out) 7)))
+                               (funcall price-cell
+                                        (llm-pick-core--price record secondary-price 'out)
+                                        secondary-price 7)))
                  (list (format "%24s"
                                (or (cdr (assq 'openrouter (plist-get record :providers)))
                                    "-"))))))

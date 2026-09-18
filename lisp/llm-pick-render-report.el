@@ -115,6 +115,17 @@ MAXIMUM is the highest score of the report, used to scale the bar."
   (pcase column
     ('bar (llm-pick-render-report--bar (llm-pick-core--field model 'score) maximum))
     ('gap (llm-pick-render-report--percent (llm-pick-core--field model 'gap)))
+    ((or 'or-in 'or-out 'bm-in 'bm-out)
+     (let ((value (llm-pick-core--field model column))
+           (src (if (memq column '(or-in or-out))
+                    (symbol-value 'llm-pick-core-default-price-source)
+                  (symbol-value 'llm-pick-core-secondary-price-source))))
+       (cond ((null value) llm-pick-render-report--missing)
+             ((and (numberp value) (zerop value))
+              (if (eq src 'openrouter)
+                  "free"
+                llm-pick-render-report--missing))
+             (t (llm-pick-render-report--number value)))))
     (_ (let ((value (llm-pick-core--field model column)))
          (cond ((null value) llm-pick-render-report--missing)
                ((numberp value) (llm-pick-render-report--number value))
