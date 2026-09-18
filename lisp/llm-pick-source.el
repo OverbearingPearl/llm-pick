@@ -294,33 +294,40 @@ input price; :cache is nil when the provider does not quote one."
   "Return the entries of the OpenRouter model list.
 OPTIONS is ignored: the endpoint answers with every model at once, so a
 category does not change the answer."
-  (let* ((data (llm-pick-fetch-get-json llm-pick-fetch-get--openrouter-url
-                                    (llm-pick-source--openrouter-headers)))
-         ;; The list is documented as \"data\"; \"models\" is accepted as
-         ;; well, so that a differently wrapped answer is read rather
-         ;; than reported as an empty catalogue.
-         (models (or (llm-pick-source--json-field data "data")
-                     (llm-pick-source--json-field data "models"))))
-    (unless (listp models)
-      (signal 'llm-pick-error
-              (list "The OpenRouter model list has no model array")))
-    (cl-loop for model in models
-             for id = (llm-pick-source--json-field model "id")
-             when id
-             ;; A ~-prefixed latest alias points at a concrete version via
-             ;; \"alias_target\"; use the target slug as the canonical id so
-             ;; the alias merges into that version instead of staying an
-             ;; unmatched ~-prefixed entry.
-             for alias-target = (llm-pick-source--json-field model "alias_target")
-             for slug = (and alias-target
-                             (llm-pick-source--json-field alias-target "slug"))
-             for canonical-id = (or slug id)
-             collect (append (list :id canonical-id
-                                   :display-name (or (llm-pick-source--json-field model "name")
-                                                     canonical-id)
-                                   :providers (list (cons 'openrouter id)))
-                             (let ((prices (llm-pick-source--openrouter-prices model)))
-                               (when prices (list :prices prices)))))))
+  (cl-flet ((normalized-name (name)
+              "Strip a leading \"Vendor: \" prefix from NAME, BenchLM style.
+Only the first colon followed by a space counts, so names like
+\"GLM 5: Turbo\" keep their inner colon."
+              (replace-regexp-in-string "\\`[^:]*: " "" name)))
+    (let* ((data (llm-pick-fetch-get-json llm-pick-fetch-get--openrouter-url
+                                          (llm-pick-source--openrouter-headers)))
+           ;; The list is documented as "data"; "models" is accepted as
+           ;; well, so that a differently wrapped answer is read rather
+           ;; than reported as an empty catalogue.
+           (models (or (llm-pick-source--json-field data "data")
+                       (llm-pick-source--json-field data "models"))))
+      (unless (listp models)
+        (signal 'llm-pick-error
+                (list "The OpenRouter model list has no model array")))
+      (cl-loop for model in models
+               for id = (llm-pick-source--json-field model "id")
+               when id
+               ;; A ~-prefixed latest alias points at a concrete version via
+               ;; "alias_target"; use the target slug as the canonical id so
+               ;; the alias merges into that version instead of staying an
+               ;; unmatched ~-prefixed entry.
+               for alias-target = (llm-pick-source--json-field model "alias_target")
+               for slug = (and alias-target
+                               (llm-pick-source--json-field alias-target "slug"))
+               for canonical-id = (or slug id)
+               collect (append (list :id canonical-id
+                                     :display-name
+                                     (normalized-name
+                                      (or (llm-pick-source--json-field model "name")
+                                          canonical-id))
+                                     :providers (list (cons 'openrouter id)))
+                               (let ((prices (llm-pick-source--openrouter-prices model)))
+                                 (when prices (list :prices prices))))))))
 
 (defun llm-pick-source--openrouter-benchmarks-loader (options)
   "Return entries from the OpenRouter benchmarks endpoint.

@@ -190,8 +190,8 @@ secondary price source, named by the variable
 llm-pick-core-secondary-price-source.  Both names are resolved
 dynamically here since those variables live in llm-pick.el.  The
 name, score and id columns keep their fixed widths (the name
-column is 54 characters wide, and longer display names are
-truncated to 54 characters so that all columns stay aligned, and
+column is 50 characters wide, and longer display names are
+truncated to 50 characters so that all columns stay aligned, and
 the id column is left-aligned at 24 characters) so they
 still line up with the header from llm-pick-view--insert-columns."
   (let* ((default-price (symbol-value 'llm-pick-core-default-price-source))
@@ -227,9 +227,9 @@ still line up with the header from llm-pick-view--insert-columns."
          (name (truncate-string-to-width
                 (or (plist-get record :display-name)
                     (llm-pick-core--field record 'name))
-                54))
+                50))
          (cells (append
-                 (list (format "%-54s" name))
+                 (list (format "%-48s" name))
                  (list (format "%9s"
                                (funcall bare-num (llm-pick-core--field record 'score))))
                  (list (funcall join
@@ -272,11 +272,11 @@ fixed 7-character components (23 chars total, 2 separator spaces);
 missing values are shown as \"---\".
 
 Column widths match those used by `llm-pick-view--line' so the header
-aligns with the data rows: name %-54s (matching
-`llm-pick-view--line''s truncation of display names to 54 characters),
+aligns with the data rows: name %-48s (matching
+`llm-pick-view--line''s truncation of display names to 50 characters),
 score %9s, BenchLM joined cell 31 chars, OR joined cell 11 chars, each
 price cell 23 chars, and the OpenRouter id left-aligned in %-24s."
-  (let* ((head (concat (format "%-54s  %9s" "Model" "Score")))
+  (let* ((head (concat (format "%-48s  %9s" "Model" "Score")))
          ;; The joined score cells aggregate category scores; list the
          ;; abbreviations so the compact columns are interpretable:
          ;; BenchLM has 8 categories (8*3+7=31 chars), OpenRouter-derived
@@ -286,8 +286,8 @@ price cell 23 chars, and the OpenRouter id left-aligned in %-24s."
          ;; integer (missing as "---").  Each price cell joins three
          ;; fixed 7-character in/cache/out values (3*7+2=23 chars).
          (head (concat head "  " (format "%-31s"
-                                         "BenchLM Ag Co Re Mm Kn Ml IF Ma")))
-         (head (concat head "  " (format "%-11s" "OR In Co Ag")))
+                                         "BenchLM(Ag/Co/Re/Mm/Kn/Ml/IF/Ma)")))
+         (head (concat head "  " (format "%-11s" "OR(In/Co/Ag)")))
          (head (concat head "  " (format "%-23s" "BenchLM $/M in/ca/out")))
          (head (concat head "  " (format "%-23s" "OpenRT $/M in/ca/out")))
          (head (concat head "  " (format "%-24s" "OpenRouter id")))
