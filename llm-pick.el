@@ -1,9 +1,9 @@
 ;;; llm-pick.el --- Pick the best LLM by capability and price -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 OverbearingPearl
-;; Author: madachuan <madachuan.noreply.github.com>
+;; Author: OverbearingPearl <OverbearingPearl@outlook.com>
 ;; Assisted-by: Claude
-;; URL: https://github.com/madachuan/llm-pick
+;; URL: https://github.com/OverbearingPearl/llm-pick
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; Version: 0.0.1
