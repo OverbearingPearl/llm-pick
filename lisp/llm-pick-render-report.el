@@ -77,6 +77,29 @@ column."
     (concat (make-string filled ?█)
             (make-string (- width filled) ?░))))
 
+(defun llm-pick-render-report--wrap (line width)
+  "Hard-wrap LINE at word boundaries so each line fits WIDTH columns.
+Return the wrapped text with lines joined by newlines; continuation
+lines get no extra indentation.  If LINE already fits within WIDTH,
+return it unchanged."
+  (if (<= (length line) width)
+      line
+    (let ((words (split-string line "[ \t]+" t))
+          (parts nil)
+          (current nil))
+      (dolist (word words)
+        (cond
+         ((null current)
+          (setq current word))
+         ((<= (+ (length current) 1 (length word)) width)
+          (setq current (concat current " " word)))
+         (t
+          (push current parts)
+          (setq current word))))
+      (when (and current (> (length current) 0))
+        (push current parts))
+      (mapconcat #'identity (nreverse parts) "\n"))))
+
 (defun llm-pick-render-report--maximum-score (models)
   "Return the highest score among MODELS, or nil when none carries one."
   (let (best)
@@ -267,6 +290,202 @@ below the table."
                          steps)))
          (note (llm-pick-render-report--frontier-note steps)))
     (if note (concat table "\n\n" note) table)))
+
+(defun llm-pick-render-report-budget-guide (models)
+  "Render a budget-oriented guide for MODELS.
+
+Aimed at users who have vague expectations about both budget and capability.
+
+MODELS are the post-eligibility models (as filtered by the caller).
+The function:
+1. computes the Pareto frontier via `llm-pick-analyze--frontier';
+2. splits the frontier into three price tiers ($0-1, $1-5, $5+), one
+   best model per tier (tier bounds may be parameterized later);
+3. per row keeps a capability bar (via `llm-pick-render-report--bar',
+   scaled to the highest score), showing: tier label (cheap / mid /
+   premium), model name, capability bar, default score, $/M out and a
+   value column (score per dollar, the \\='value\\=' field, -- when nil);
+4. annotates each frontier step's marginal gain via
+   `llm-pick-analyze--step-gain', tagging steps below
+   `llm-pick-render-report-marginal-threshold' with \"<- dear step\"
+   and high-gain steps with \"<- good step up\";
+5. appends two explanatory footer lines: one explaining the columns,
+   one giving the conclusion \"For a tight budget pick X; Y adds N
+   points for $M more, the best value step\".
+
+Returns a single string (lines joined with newlines, wrapped to 80
+columns), like the table renderer, so callers can concat it directly.
+All fields are read via `llm-pick-core--field' (price with \\='or-out);
+models lacking score/price degrade to ---."
+  (let* ((models (append models nil))
+         (scored (seq-filter
+                  (lambda (m)
+                    (and (llm-pick-core--field m 'score)
+                         (llm-pick-core--field m 'or-out)))
+                  models))
+         (max-score (apply #'max 0
+                           (mapcar (lambda (m)
+                                     (or (llm-pick-core--field m 'score) 0))
+                                   scored)))
+         (frontier (llm-pick-analyze--frontier scored))
+         (bar-width 20)
+         (lines (list "Budget guide (Pareto frontier by price tier):" "")))
+    (if (null frontier)
+        (push "  no eligible models with score and price" lines)
+      ;; Group frontier into price tiers and pick best per tier.
+      (let* ((tiers
+              (list (cons "cheap" 1.0) (cons "mid" 5.0) (cons "premium" nil)))
+             (per-tier
+              (mapcar
+               (lambda (tier)
+                 (let* ((label (car tier))
+                        (upper (cdr tier))
+                        (cands
+                         (seq-filter
+                          (lambda (m)
+                            (let ((p (llm-pick-core--field m 'or-out)))
+                              (if upper (and (>= p 0) (< p upper)) t)))
+                          frontier)))
+                   (cons label (car (last cands)))))
+               tiers)))
+        (dolist (row per-tier)
+          (let* ((label (car row))
+                 (m (cdr row)))
+            (if (null m)
+                (push (format "  %-8s %-20s --" label "(no model)") lines)
+              (let* ((score (llm-pick-core--field m 'score))
+                     (price (llm-pick-core--field m 'or-out))
+                     (value (llm-pick-core--field m 'value))
+                     (bar (llm-pick-render-report--bar
+                           score max-score bar-width)))
+                (push
+                 (format "  %-8s %-20s %s %5.1f %6.2f %6s"
+                         label
+                         (or (llm-pick-core--field m 'name) "---")
+                         bar
+                         (or score 0.0)
+                         (or price 0.0)
+                         (if value (format "%.1f" value) "--"))
+                 lines))))))
+      (push "" lines)
+      ;; Step-gain annotations along the frontier.
+      (let ((prev nil))
+        (dolist (m frontier)
+          (when prev
+            (let* ((gain (llm-pick-analyze--step-gain prev m))
+                   (p-prev (llm-pick-core--field prev 'or-out))
+                   (p-cur (llm-pick-core--field m 'or-out))
+                   (note (cond ((null gain) nil)
+                               ((< gain llm-pick-render-report-marginal-threshold)
+                                "  <- dear step")
+                               (t "  <- good step up"))))
+              (push
+               (format "  step %s -> %s: +%s pts for $%.2f more%s"
+                       (or (llm-pick-core--field prev 'name) "---")
+                       (or (llm-pick-core--field m 'name) "---")
+                       (if gain (format "%.1f" gain) "--")
+                       (- p-cur p-prev)
+                       (or note ""))
+               lines)))
+          (setq prev m)))
+      (push "" lines)
+      ;; Conclusion: cheapest frontier model vs its next upgrade.
+      (let ((first (car frontier))
+            (second (cadr frontier)))
+        (push
+         (if (and first second
+                  (llm-pick-core--field first 'or-out)
+                  (llm-pick-core--field second 'or-out))
+             (let* ((gain (llm-pick-analyze--step-gain first second))
+                    (extra (- (llm-pick-core--field second 'or-out)
+                              (llm-pick-core--field first 'or-out))))
+               (if gain
+                   (format "For a tight budget pick %s; %s adds %d points for $%s more, the best value step"
+                           (llm-pick-core--field first 'name)
+                           (llm-pick-core--field second 'name)
+                           (round gain)
+                           (format "%.2f" extra))
+                 (format "For a tight budget pick %s"
+                         (llm-pick-core--field first 'name))))
+           (format "For a tight budget pick %s"
+                   (if first (llm-pick-core--field first 'name) "nothing")))
+         lines)))
+    (push "" lines)
+    (push "pt/$ = capability per dollar; a dear step means the dearer model is not worth the extra money"
+          lines)
+    (mapconcat #'identity
+               (nreverse (mapcar (lambda (l) (llm-pick-render-report--wrap l 80)) lines))
+               "\n")))
+
+(defun llm-pick-render-report-scatter (models)
+  "Render MODELS as a price/capability coordinate plot.
+The vertical axis is the score, the horizontal axis the output price
+per million tokens on a logarithmic scale.  A star marks a model on
+the Pareto frontier, an O a model dominated by one of them.  The
+upper left corner is the good corner: more capability for less
+money.  Below the plot the frontier models are named with their
+score and price, so every star can be looked up."
+  (let* ((scored (seq-filter
+                  (lambda (m)
+                    (let ((s (llm-pick-core--field m 'score))
+                          (p (llm-pick-core--field m 'or-out)))
+                      (and (numberp s) (numberp p) (> p 0))))
+                  (append models nil)))
+         (width 56)
+         (height 13)
+         (frontier (llm-pick-analyze--frontier scored))
+         (scores (mapcar (lambda (m) (llm-pick-core--field m 'score)) scored))
+         (prices (mapcar (lambda (m) (llm-pick-core--field m 'or-out)) scored))
+         (s-lo (floor (apply #'min scores)))
+         (s-hi (ceiling (apply #'max scores)))
+         (p-lo (apply #'min prices))
+         (p-hi (apply #'max prices))
+         (grid (mapcar (lambda (_) (make-string width ?\s))
+                       (make-list height nil))))
+    (if (null scored)
+        (list "  no model carries both a score and a positive price")
+      (let ((place
+             (lambda (m mark)
+               (let* ((s (llm-pick-core--field m 'score))
+                      (p (llm-pick-core--field m 'or-out))
+                      (r (round (* (1- height)
+                                   (/ (- s-hi s) (float (- s-hi s-lo))))))
+                      (lp (log (max p 1e-9)))
+                      (llo (log (max p-lo 1e-9)))
+                      (lhi (log (max p-hi 1e-9)))
+                      (x (round (+ 1 (* (- width 3)
+                                        (/ (- lp llo)
+                                           (max (- lhi llo) 1e-9)))))))
+                 (aset (nth r grid)
+                       (max 1 (min (1- width) x)) mark)))))
+        (dolist (m scored)
+          (unless (memq m frontier) (funcall place m ?o)))
+        (dolist (m frontier) (funcall place m ?*)))
+      (append
+       (list "  score over price, log scale:"
+             (concat "      +" (make-string width ?-)))
+       (cl-loop for r from 0 below height
+                for s = (- s-hi
+                           (round (* r (/ (- s-hi s-lo)
+                                          (float (1- height))))))
+                collect (format "%5.0f |%s|" s (nth r grid)))
+       (list (concat "      +" (make-string width ?-))
+             (format "       $%.2f%s$%.2f/M out (log scale)"
+                     p-lo
+                     (make-string (max 1 (- width 16)) ?\s)
+                     p-hi)
+             ""
+             "  * = Pareto frontier, o = dominated by one of them;"
+             "  upper left is the good corner (more capable, cheaper)"
+             ""
+             (format "  frontier: %s"
+                     (mapconcat
+                      (lambda (m)
+                        (format "%s (%.1f, $%.2f)"
+                                (llm-pick-core--field m 'name)
+                                (llm-pick-core--field m 'score)
+                                (llm-pick-core--field m 'or-out)))
+                      frontier ", ")))))))
 
 (defun llm-pick-render-report-bound (bound)
   "Return a price BOUND as a cell; nil is the open ended bucket."

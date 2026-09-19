@@ -251,7 +251,7 @@ option.")
 
 (defconst llm-pick--pick-key-groups
   '((:category :sources :anchor)
-    (:budget :target-score :available-on))
+    (:budget :target-score :available-on :consensus))
   "Argument groups accepted by `llm-pick-pick'.")
 
 (defun llm-pick--report-args (args group)
@@ -314,7 +314,9 @@ ARGS is the plist the report was called with; its category,
     (format "=== %s ===" (mapconcat #'identity parts " | "))))
 
 (defun llm-pick--report-body (args models)
-  "Return the rendered body of the report that ARGS asks for over MODELS."
+  "Return the rendered body of the report that ARGS asks for over MODELS.
+Supported modes are `table', `frontier', `ladder', `guide', and
+`scatter'."
   (pcase (or (plist-get args :mode) 'table)
     ('table (llm-pick-render-report-text models
                              (or (plist-get args :columns)
@@ -324,15 +326,20 @@ ARGS is the plist the report was called with; its category,
     ('ladder (llm-pick-render-report-ladder
               models
               (or (plist-get args :bounds) llm-pick-report-ladder-bounds)))
+    ('guide (llm-pick-render-report-budget-guide models))
+    ('scatter (llm-pick-render-report-scatter models))
     (_ (signal 'llm-pick-error
                (list (format "Unknown report mode: %S, expected one of %S"
                              (plist-get args :mode)
-                             '(table frontier ladder)))))))
+                             '(table frontier ladder guide scatter)))))))
 
 (defun llm-pick--report-text (args models)
   "Return the text of the report that ARGS asks for over MODELS."
-  (concat (llm-pick--report-headline args (length models)) "\n\n"
-          (llm-pick--report-body args models) "\n"))
+  (let ((body (llm-pick--report-body args models)))
+    (when (listp body)
+      (setq body (mapconcat #'identity body "\n")))
+    (concat (llm-pick--report-headline args (length models)) "\n\n"
+            body "\n")))
 
 (define-derived-mode llm-pick-report-mode special-mode "llm-pick"
   "Major mode of the `llm-pick-report' buffer."
@@ -431,12 +438,48 @@ so that the menu can offer the query without one."
          (llm-pick-query-read-args llm-pick--report-query-prompt)))
 
 ;;;###autoload
-(defun llm-pick-cheap-strong ()
-  "Show the capable models that cost little.
-Every model scoring at least 75 for less than $5 per million output
-tokens, strongest first."
+(defun llm-pick-cheap-strong (&optional budget target)
+  "Pick the cheap, strong model the chooser would select.
+Run `llm-pick--pick-record' with TARGET and BUDGET (defaults 75 and 5.0
+when called from Lisp; read interactively), with :consensus t, and
+message the chosen model's name, default score, output price per
+million tokens, and provider IDs.  Before messaging, display the
+candidate table via `llm-pick-report' with the same budget and target
+score in scatter mode (a price/capability coordinate plot); the plot
+marks the Pareto frontier with a star and the dominated models with an
+O, so the good corner -- more capable for less money -- is visible at
+a glance, while the final verdict is the message's consensus result."
   (interactive)
-  (llm-pick-report :target-score 75 :budget 5.0 :order 'score :descending t))
+  (unless budget
+    (setq budget (if (called-interactively-p 'any)
+                     (read-number "Budget ($ per million output tokens): " 5.0)
+                   5.0)))
+  (unless target
+    (setq target (if (called-interactively-p 'any)
+                     (read-number "Target score: " 75)
+                   75)))
+  (condition-case nil
+      (let* ((record (llm-pick--pick-record
+                      :target-score target
+                      :budget budget
+                      :consensus t))
+             (name (llm-pick-core--field record 'name))
+             (score (llm-pick-core--field record 'score))
+             (or-out (llm-pick-core--field record 'or-out))
+             (providers (llm-pick-pick--providers record)))
+        (llm-pick-report :budget budget
+                         :target-score target
+                         :mode 'scatter)
+        (message "Chosen: %s (score %.1f, $%.2f per million output tokens, providers: %s)"
+                 name score or-out
+                 (mapconcat #'identity
+                            (mapcar (lambda (pair)
+                                      (format "%s: %s" (car pair) (cdr pair)))
+                                    providers)
+                            ", ")))
+    (llm-pick-error
+     (message "No model found scoring at least %s for under $%s per million output tokens."
+              target budget))))
 
 ;;;###autoload
 (defun llm-pick-report-benchmark (baseline &rest args)
@@ -492,10 +535,17 @@ a normalization rule that drops too much is visible right away."
 
 ;;; Choosing
 
-(defun llm-pick--pick-record (args)
+(defun llm-pick--pick-record (&rest args)
   "Return the record `llm-pick-pick' would answer ARGS with.
-ARGS is written as for `llm-pick-pick'; `:providers' is a spelling of
-`:available-on' here too."
+ARGS may be given either as a flat plist, as in
+\\=(llm-pick--pick-record :budget 1.0), or as a single plist argument,
+as in \\=(llm-pick--pick-record \\='(:budget 1.0)); both forms work.
+:providers is a spelling of :available-on here too.  :consensus
+is passed through to the choice logic as well."
+  (when (and (= (length args) 1)
+             (listp (car args))
+             (keywordp (car (car args))))
+    (setq args (car args)))
   (setq args (llm-pick-query-run--expand-aliases args))
   (llm-pick--check-args args llm-pick--pick-key-groups)
   (let* ((models (apply #'llm-pick-collect
@@ -504,7 +554,7 @@ ARGS is written as for `llm-pick-pick'; `:providers' is a spelling of
          (choice (apply #'llm-pick-pick--choose
                         models
                         (llm-pick--report-args
-                         args '(:budget :target-score :available-on)))))
+                         args '(:budget :target-score :available-on :consensus)))))
     (llm-pick-pick--find models (llm-pick-core--field choice 'name))))
 
 (defun llm-pick-pick (&rest args)

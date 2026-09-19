@@ -114,6 +114,7 @@ The cheaper model wins; on equal prices the more capable one wins."
   (let ((budget (plist-get args :budget))
         (target (plist-get args :target-score))
         (providers (plist-get args :available-on))
+        (consensus (plist-get args :consensus))
         parts)
     (when budget
       (push (format "an output price of at most $%s/M" budget) parts))
@@ -121,6 +122,8 @@ The cheaper model wins; on equal prices the more capable one wins."
       (push (format "a score of at least %s" target) parts))
     (when providers
       (push (format "availability on %S" providers) parts))
+    (when consensus
+      (push "scores agreed across sources" parts))
     (if parts
         (mapconcat #'identity (nreverse parts) " and ")
       "no criterion")))
@@ -133,33 +136,92 @@ ARGS is a plist:
   :target-score  lowest capability score
   :available-on  providers; the result carries an ID for at least one of
                  them
+  :consensus     when non-nil, rank by a consensus score: the average of
+                 the ((score SOURCE) ...) fields carried by the record
+                 over the sources named in
+                 `llm-pick-align-match-consensus-sources'; if fewer than
+                 two sources agree, the record's default score is used
+                 instead
 
-Only models that carry both a score and an output price take part, and
-the ranking follows the criterion that was given:
+Eligibility is decided before any frontier culling: a model must satisfy
+the :budget, :target-score and :available-on criteria as filtered by
+`llm-pick-query-run-query' and must be comparable, i.e. carry both a
+score and an output price.  Among the eligible candidates the Pareto
+frontier is computed with `llm-pick-analyze--frontier', removing models
+dominated on both axes (a strictly better model exists in score and in
+price), so reaching the target is never traded away for dominance.  The
+ranking follows the criterion that was given:
 
   a budget alone        the most capable model that fits
   a target score alone  the cheapest model that reaches the target
   both                  the most capable model that satisfies both
 
 A tie on the first criterion is broken by the other one.  Signal
-`llm-pick-error' when nothing qualifies."
+`llm-pick-error' when nothing qualifies; the message then names the
+nearest upgrade path: the highest-capable affordable model under the
+budget plus the suggestion of `llm-pick-analyze--next-upgrade'."
   (let* ((budget (plist-get args :budget))
+         (target-score (plist-get args :target-score))
+         (consensus (plist-get args :consensus))
          (candidates (llm-pick-query-run-query
                       models
                       :budget budget
-                      :target-score (plist-get args :target-score)
+                      :target-score target-score
                       :available-on (plist-get args :available-on)))
-         ;; `llm-pick-query-run-query' hands back its argument when it removes
-         ;; nothing, so the sort below has to run on a copy.
          (usable (cl-remove-if-not #'llm-pick-analyze--comparable-p
                                    (copy-sequence candidates))))
     (unless usable
       (signal 'llm-pick-error
               (list (format "No model among the %d known ones satisfies %s"
                             (length models) (llm-pick-pick--criteria args)))))
-    (car (sort usable (if (and (plist-get args :target-score) (null budget))
-                          #'llm-pick-pick--cheaper-p
-                        #'llm-pick-pick--better-p)))))
+    (let* ((frontier (llm-pick-analyze--frontier usable))
+           (cheaper-only (and target-score (null budget)))
+           (winner (car (sort (copy-sequence frontier)
+                              (if cheaper-only
+                                  #'llm-pick-pick--cheaper-p
+                                #'llm-pick-pick--better-p)))))
+      (or winner
+          (let* ((affordable
+                  (and budget
+                       (car (sort
+                             (cl-remove-if-not
+                              (lambda (m)
+                                (<= (llm-pick-core--field m 'or-out) budget))
+                              (copy-sequence usable))
+                             #'llm-pick-pick--better-p))))
+                 (upgrade
+                  (and affordable
+                       (llm-pick-analyze--next-upgrade models affordable))))
+            (signal
+             'llm-pick-error
+             (list
+              (if (and affordable upgrade)
+                  (format
+                   "the best fit is %s (score %s at $%s/M); spending more reaches %s (score %s at $%s/M)"
+                   (llm-pick-core--field affordable 'name)
+                   (llm-pick-pick--score affordable consensus)
+                   (llm-pick-core--field affordable 'or-out)
+                   (llm-pick-core--field upgrade 'name)
+                   (llm-pick-pick--score upgrade consensus)
+                   (llm-pick-core--field upgrade 'or-out))
+                (format "No model among the %d known ones satisfies %s"
+                        (length models) (llm-pick-pick--criteria args))))))))))
+
+(defun llm-pick-pick--score (model consensus)
+  "Return the score of MODEL, honoring CONSENSUS.
+With CONSENSUS non-nil, average the ((score SOURCE) ...) values MODEL
+carries over `llm-pick-align-match-consensus-sources'; fall back to the
+default score when fewer than two sources agree."
+  (if (not consensus)
+      (llm-pick-analyze--score model)
+    (let ((scores nil))
+      (dolist (source llm-pick-align-match-consensus-sources)
+        (let ((value (cdr (assoc source
+                                 (llm-pick-analyze--per-source-scores model)))))
+          (when value (push value scores))))
+      (if (< (length scores) 2)
+          (llm-pick-analyze--score model)
+        (/ (apply #'+ scores) (float (length scores)))))))
 
 (provide 'llm-pick-pick)
 

@@ -34,6 +34,27 @@ Make sure both values are numbers."
         (price (llm-pick-core--field model 'or-out)))
     (and (numberp score) (numberp price))))
 
+(defun llm-pick-analyze--name (model)
+  "Return MODEL's canonical name."
+  (plist-get model :name))
+
+(defun llm-pick-analyze--price (model)
+  "Return MODEL's default output price."
+  (plist-get model :price))
+
+(defun llm-pick-analyze--score (model)
+  "Return MODEL's default score."
+  (plist-get model :score))
+
+(defun llm-pick-analyze--per-source-scores (model)
+  "Return alist of (SOURCE . SCORE) from MODEL's :scores plist."
+  (let ((plist (plist-get model :scores))
+        (result nil))
+    (while plist
+      (push (cons (car plist) (cadr plist)) result)
+      (setq plist (cddr plist)))
+    (nreverse result)))
+
 (defun llm-pick-analyze--dominates-p (a b)
   "Return non-nil when the price/capability trade of A beats that of B.
 A dominates B when A is at least as capable, costs no more, and is
