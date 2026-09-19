@@ -40,7 +40,7 @@
 ;;   ;;   M-x llm-pick-cheap-strong     capable models that cost little
 ;;   M-x llm-pick-pick-interactive the best model under a budget
 ;;   M-x llm-pick-align-report     what the last alignment did
-;;   M-x llm-pick-align-check      every ID problem of a run, in one buffer
+
 ;;   M-x llm-pick-test-run         the test suite, from llm-pick-test.el
 ;;
 ;; A report command answers with its defaults and asks nothing.  With a
@@ -88,6 +88,11 @@
   (expand-file-name "lisp" llm-pick--directory)
   "Directory holding the implementation modules.")
 
+(defgroup llm-pick nil
+  "Pick and call LLMs from Emacs."
+  :group 'tools
+  :prefix "llm-pick-")
+
 (dolist (dir (list llm-pick--lisp-directory llm-pick--directory))
   (add-to-list 'load-path dir))
 
@@ -107,26 +112,24 @@
 
 ;;; User options
 
-(defgroup llm-pick nil
-  "Pick the best LLM by capability and price."
-  :group 'tools
-  :prefix "llm-pick-")
-
 (defcustom llm-pick-source-openrouter-api-key nil
   "Bearer token sent with the OpenRouter request.
 Nil, the default, falls back to the OPENROUTER_API_KEY environment
 variable; when neither is set the header is left out, so a public
 endpoint keeps working."
+  :group 'llm-pick
   :type '(choice (const :tag "From the environment" nil) string))
 
 (defcustom llm-pick-core-default-capability-source 'benchlm
   "Source used by the `score' shorthand and the `score' predicate."
+  :group 'llm-pick
   :type 'symbol)
 
 (defcustom llm-pick-core-default-price-source 'benchlm
   "Default price source used by the `in'/`out' price shorthands and predicates.
 The other source, `openrouter', is pointed at by
 `llm-pick-core-secondary-price-source'."
+  :group 'llm-pick
   :type 'symbol)
 
 (defcustom llm-pick-core-secondary-price-source 'openrouter
@@ -137,14 +140,17 @@ Defaults to `openrouter', whose OpenRouter prices are read by the `bm-in',
 `bm-out' and `gap' fields out of the box; only change this option when
 you register a different second price source; see the Sources section
 of README.md."
+  :group 'llm-pick
   :type '(choice (const :tag "None" nil) symbol))
 
 (defcustom llm-pick-render-report-marginal-threshold 2.0
   "Marginal gain in points per dollar below which paying more is not advised."
+  :group 'llm-pick
   :type 'number)
 
 (defcustom llm-pick-render-report-default-bar-width 30
   "Default width of the capability bar in the report buffer."
+  :group 'llm-pick
   :type 'integer)
 
 (defcustom llm-pick-report-columns '(name bar score or-out)
@@ -152,12 +158,14 @@ of README.md."
 Every column is a field `llm-pick-core--field' understands, or `bar' for the
 capability bar.  A list of the form (score SOURCE) or
 \(price SOURCE DIRECTION\) selects an explicit source."
+  :group 'llm-pick
   :type '(repeat sexp))
 
 (defcustom llm-pick-report-ladder-bounds '(0.5 1 2 5 nil)
   "Upper output price of every bucket of a `ladder' report.
 Prices are in USD per million tokens.  The last entry is nil, the open
 ended bucket that holds everything above the bound before it."
+  :group 'llm-pick
   :type '(repeat (choice number (const :tag "Open ended" nil))))
 
 (defcustom llm-pick-report-benchmark-bands '(0.5 0.8 1.25 2.0 nil)
@@ -167,16 +175,19 @@ Each number is an output price ratio against the baseline model: 0.5
 means half the baseline's output price, and 2.0 means twice as much.
 The last entry nil is an open-ended band holding everything above the
 band before it.  See `llm-pick-report-benchmark'."
+  :group 'llm-pick
   :type '(repeat (choice number (const nil)))
   :group 'llm-pick)
 
 (defcustom llm-pick-align-match-threshold 0.85
   "Minimum similarity for two IDs to count as the same model."
+  :group 'llm-pick
   :type 'number)
 
 (defcustom llm-pick-align-match-ambiguity-gap 0.05
   "Minimum score gap between the best and the second best match.
 A smaller gap makes the match ambiguous and is reported as an error."
+  :group 'llm-pick
   :type 'number)
 
 (defcustom llm-pick-align-match-consensus-sources 2
@@ -192,6 +203,7 @@ so the rule needs three catalogues or more to fire at all; with the two
 sources registered by default it never does.  It is meant for a
 collection that reads several stores, where a model may be listed by only
 some of them."
+  :group 'llm-pick
   :type 'integer)
 
 (defcustom llm-pick-align-match-consensus-band 0.05
@@ -200,10 +212,12 @@ An ID whose best anchor match scores inside this band, and whose normalized
 form at least `llm-pick-align-match-consensus-sources' sources share, is matched
 to that anchor model.  A wider band matches more and risks merging two
 models that two catalogues happen to name alike; 0 turns the rule off."
+  :group 'llm-pick
   :type 'number)
 
 (defcustom llm-pick-align-on-unmatched 'standalone
   "What to do with an ID that matches no model of the anchor source."
+  :group 'llm-pick
   :type '(choice (const :tag "Keep as a standalone model" standalone)
                  (const :tag "Signal an error" error)))
 
@@ -455,48 +469,26 @@ baseline moves.  ARGS is a plist for `llm-pick-collect', such as
       (llm-pick--report-display text "*llm-pick*")
       text)))
 
-(defun llm-pick-align-report-text (&optional all)
-  "Return the text of the report of the last alignment.
-ALL is passed on to `llm-pick-render-report-alignment'."
+(defun llm-pick-align-report-text ()
+  "Return the text of the report of the last alignment, including all sections."
   (let ((report llm-pick-align--last-report))
     (unless report
       (signal 'llm-pick-error
               (list "No alignment has run yet; call `llm-pick-collect' first")))
-    (llm-pick-render-report-alignment report all)))
+    (llm-pick-render-report-alignment report)))
 
 ;;;###autoload
-(defun llm-pick-align-report (&optional all)
+(defun llm-pick-align-report ()
   "Show what the last call to `llm-pick-align' did.
 
 The report names every decision a run made: which ID came from which
 source, what the normalizer turned it into and the canonical model it was
-taken for, grouped by how the two were brought together.  ALL, the prefix
-argument interactively, also lists the IDs that normalize to the anchor's
-model already, which is where a normalization rule that drops too much
-would show."
-  (interactive "P")
-  (llm-pick--report-display (llm-pick-align-report-text all)
-                            "*llm-pick-align*"))
-
-;;;###autoload
-(defun llm-pick-align-check (&rest args)
-  "Show every ID problem a collection meets, not only the first.
-Return the text it shows.  ARGS is a plist for `llm-pick-collect'; with
-no argument at all it checks every model of every registered source,
-which is the widest net, and it costs one collection.
-
-An alignment normally stops at the first problem, because a report built
-on a wrong canonical ID is worse than no report.  This command walks the
-whole catalogue instead and renders the problems grouped by kind, so
-that a source which trips three normalization rules can be fixed in one
-pass.  An ID problem is shown, never signaled; a source that cannot be
-read at all still signals `llm-pick-error'."
+taken for, grouped by how the two were brought together.  It always lists
+every section, including the full unmatched table and the exact table, so
+a normalization rule that drops too much is visible right away."
   (interactive)
-  (let ((llm-pick-align--collecting t)
-        (llm-pick-align--problems nil))
-    (apply #'llm-pick-collect args)
-    (llm-pick--report-display
-     (llm-pick-render-report-problems llm-pick-align--problems))))
+  (llm-pick--report-display (llm-pick-align-report-text)
+                            "*llm-pick-align*"))
 
 ;;; Choosing
 
@@ -567,9 +559,9 @@ ARGS is a plist for `llm-pick-pick'."
 ;;;###autoload
 (defun llm-pick ()
   "Show the main view of every model from every registered source.
-The data is fetched once from every source and cached for
-`llm-pick-view-cache-ttl' seconds, so repeated calls do not download
-again.  The buffer supports hjkl/npfb cursor motion, RET opens the
+The data is fetched once per session and kept in memory; with a
+prefix argument it is fetched again.  The buffer supports
+hjkl/npfb cursor motion, RET opens the
 model view of the entry at point and q quits; see the header line."
   (interactive)
   (llm-pick-view-main))

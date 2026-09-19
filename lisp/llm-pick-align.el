@@ -42,29 +42,6 @@
 (define-error 'llm-pick-align-ambiguous "ID alignment ambiguity" 'llm-pick-error)
 (define-error 'llm-pick-align-unmatched "ID without a match" 'llm-pick-error)
 
-(defvar llm-pick-align--problems nil
-  "Problems the current collecting run has met, newest first.
-Only a run with `llm-pick-align--collecting' non-nil fills it.
-`llm-pick-align-check' binds it and renders it.")
-
-(defvar llm-pick-align--collecting nil
-  "Whether `llm-pick-align' collects its problems instead of signaling.
-Nil, the default, stops at the first one: a report built on a wrong
-canonical ID is worse than no report.  A collecting run walks every ID
-instead, so that a catalogue which broke three rules in three places can
-be fixed in one pass, see `llm-pick-align-check'.")
-
-(defun llm-pick-align--problem (type description)
-  "Report the TYPE problem described by DESCRIPTION.
-While `llm-pick-align--collecting' is non-nil, remember it and return, so
-that one run lists every problem it can find; otherwise signal it, with
-a pointer to the command that collects them all."
-  (if llm-pick-align--collecting
-      (push (list :type type :description description) llm-pick-align--problems)
-    (signal type
-            (list (concat description
-                          "\nRun M-x llm-pick-align-check to list every ID problem of a run at once.")))))
-
 ;;; Normalization
 
 (defcustom llm-pick-normalize-rules
@@ -204,6 +181,12 @@ when they name two different models."
            when (and rule (equal step-a step-b))
            return rule))
 
+(defun llm-pick-align--problem (type description)
+  "Signal an error of TYPE with DESCRIPTION as its data.
+This stops the run at the first problem, which is the intended
+behavior now that `llm-pick-align-check' is gone."
+  (signal type (list description)))
+
 ;;; Alignment
 
 (defvar llm-pick-align--last-report nil
@@ -340,11 +323,11 @@ computed as 0.04999999999999993, counts as smaller than a threshold of
   "Align ID of SOURCE against the anchor described by INDEX and CANONICALS.
 INDEX and CANONICALS come from `llm-pick-align--anchor-index'.
 Return a plist (:canonical CANONICAL :warning WARNING); WARNING is nil
-for a clean match.  Report `llm-pick-align-ambiguous' when the two best
+for a clean match.  Signal `llm-pick-align-ambiguous' when the two best
 matches are closer than `llm-pick-align-match-ambiguity-gap', and
 `llm-pick-align-unmatched' when nothing reaches
 `llm-pick-align-match-threshold' and `llm-pick-align-on-unmatched' is
-`error'; see `llm-pick-align--problem' for who hears about it.
+`error'.
 
 A reported problem still returns the best canonical ID it can find, so
 that a collecting run carries on to the next ID instead of giving up on
@@ -372,11 +355,11 @@ score on its own came out just under `llm-pick-align-match-threshold'."
                 :best (car best) :score best-score :promoted normalized))
          ((< best-score llm-pick-align-match-threshold)
           (when (eq llm-pick-align-on-unmatched 'error)
-            (llm-pick-align--problem
-             'llm-pick-align-unmatched
-             (format "Source %s: %s normalizes to %s, whose best match is %s (%.3f), below `llm-pick-align-match-threshold' (%.2f)."
-                     source id normalized (or (car best) "none")
-                     best-score llm-pick-align-match-threshold)))
+            (signal 'llm-pick-align-unmatched
+                    (list source id
+                          (format "%s normalizes to %s, whose best match is %s (%.3f), below `llm-pick-align-match-threshold' (%.2f)."
+                                  id normalized (or (car best) "none")
+                                  best-score llm-pick-align-match-threshold))))
           ;; Keeping the ID as a model of its own is the answer both for
           ;; `llm-pick-align-on-unmatched' and for a collecting run, which needs
           ;; a canonical ID to carry on with.
@@ -385,14 +368,14 @@ score on its own came out just under `llm-pick-align-match-threshold'."
          ((and runner-up
                (< (- best-score (cdr runner-up))
                   (- llm-pick-align-match-ambiguity-gap llm-pick-align--gap-epsilon)))
-          (llm-pick-align--problem
-           'llm-pick-align-ambiguous
-           (format "Source %s: %s normalizes to %s and matches several anchor IDs:\n  %s (%.3f)\n  %s (%.3f)\nThe gap %.3f is below `llm-pick-align-match-ambiguity-gap' (%.2f).\nFix: adjust `llm-pick-align-similarity-fns', `llm-pick-align-match-threshold' or `llm-pick-align-match-ambiguity-gap'."
-                   source id normalized
-                   (car best) best-score
-                   (car runner-up) (cdr runner-up)
-                   (- best-score (cdr runner-up))
-                   llm-pick-align-match-ambiguity-gap))
+          (signal 'llm-pick-align-ambiguous
+                  (list source id
+                        (format "%s normalizes to %s and matches several anchor IDs:\n  %s (%.3f)\n  %s (%.3f)\nThe gap %.3f is below `llm-pick-align-match-ambiguity-gap' (%.2f).\nFix: adjust `llm-pick-align-similarity-fns', `llm-pick-align-match-threshold' or `llm-pick-align-match-ambiguity-gap'."
+                                id normalized
+                                (car best) best-score
+                                (car runner-up) (cdr runner-up)
+                                (- best-score (cdr runner-up))
+                                llm-pick-align-match-ambiguity-gap)))
           (list :canonical (car best) :norm normalized :kind 'fuzzy
                 :best (car best) :score best-score))
          (t

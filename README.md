@@ -136,7 +136,6 @@ The commands:
 | `M-x llm-pick-cheap-strong` | models scoring above 75 for less than $5/M out |
 | `M-x llm-pick-pick-interactive` | the best model the criteria you type allow |
 | `M-x llm-pick-align-report` | what the last alignment did, decision by decision |
-| `M-x llm-pick-align-check` | every ID problem of a run at once, grouped by kind |
 | `M-x llm-pick-test-run` | the ERT suite |
 
 In the main view, RET opens the model view and `q` backs out one level.  `g`
@@ -445,48 +444,24 @@ another spelling of the model; an agreement is only right if the catalogues
 that agree are not agreeing on two different things; an unmatched ID is either a
 missing rule or a model the anchor does not track.
 
-An ID that already normalizes to the anchor's model decided nothing and is
-counted, not listed — but that is also the quiet place a normalization rule
-that drops too much would land an ID on a model that is not it.  `C-u M-x
-llm-pick-align-report` lists those as a fourth section, which is what to read
-after changing `llm-pick-normalize-rules`.
+An ID that already normalizes to the anchor's model is listed in its own
+section, because that is the quiet place a normalization rule that drops too
+much would land an ID on a model that is not it — read it after changing
+`llm-pick-normalize-rules`.
 
-Of the unmatched IDs only the ones within `llm-pick-render--near-miss-band` of
-`llm-pick-align-match-threshold` are listed, because those are the only ones a rule or
-a threshold could bring in; the rest are models the anchor does not track, and a
-live collection has a few hundred of them.
+Every unmatched ID is listed, near `llm-pick-align-match-threshold` or far
+from it: the near ones are the only ones a rule or a threshold could bring in,
+the far ones are models the anchor does not track, and a live collection has a
+few hundred of them.
 
-### Check every ID problem at once
+### What happens when alignment hits an ID problem
 
-`llm-pick-align--align` stops at the first problem, because a report built on a
-wrong canonical ID is worse than no report.  That is right for a report and
-wrong for a repair: a source that trips three normalization rules would cost
-three runs to find out.
-
-`M-x llm-pick-align-check` collects once and walks the whole catalogue, then
-shows what it found in the `*llm-pick*` buffer, grouped by kind so that each
-group is one rule or one threshold to revisit:
-
-```
-=== ID problems ===
-
-3 problems in this run; every group below is one rule or one threshold to revisit.
-
-ID alignment conflict (2)
-
-  Source benchlm lists DeepSeek/DeepSeek V3.2 and DeepSeek/DeepSeek V3.1, which both normalize to deepseek.
-  The rule -v[0-9]+\(\?:\.[0-9]+\)*\' ->  collapses them; drop or tighten it in `llm-pick-normalize-rules'.
-
-  …
-
-ID without a match (1)
-
-  Source openrouter: some/unknown-model-xyz normalizes to …
-```
-
-It shows ID problems instead of signaling them; a source that cannot be read
-at all still signals `llm-pick-error`.  Every align error ends with a pointer
-to this command, so the way to see them all is one keystroke from the failure.
+Alignment signals and stops at the first ID problem, because a report built on a
+wrong canonical ID is worse than no report.  The failure message says which
+source tripped and which ID; the details behind it are visible per category in
+`M-x llm-pick-align-report`: conflicts appear in the header summary, unmatched
+IDs in the *Matched no model* section, and over-broad normalization in the
+*Normalized to the anchor's model* section.
 
 ### Benchmark against one model
 
@@ -725,9 +700,6 @@ Alignment refuses to guess.  All errors derive from `llm-pick-error`:
 
 With the default `llm-pick-align-on-unmatched` (`standalone`), an unmatched ID is kept
 as its own model and reported in the alignment report's `:warnings` instead.
-
-Every alignment error message ends with a pointer to `M-x llm-pick-align-check`,
-which lists every ID problem of a run at once instead of stopping at the first.
 
 ## Development
 

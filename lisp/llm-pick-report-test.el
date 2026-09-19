@@ -349,29 +349,6 @@ Also bind the options the expected reports depend on."
       (unless (member (nth 1 entry) '(:category :budget :target-score))
         (should (llm-pick-query-read-values (nth 1 entry)))))))
 
-(ert-deftest llm-pick-report-test-align-check-shows-a-conflict-instead ()
-  ;; The alignment stops at the first problem, which is right for a
-  ;; report and wrong for a repair: the check command walks the whole
-  ;; catalogue and shows what it found.
-  (llm-pick-report-test--with-fixtures
-    (let ((llm-pick-source-sources
-           (list (cons 'benchlm
-                       (list :kind 'capability
-                             :fetcher (lambda (_options)
-                                        '((:id "foo-bar" :score 80)
-                                          (:id "foo_bar" :score 70)))))))
-          (shown nil))
-      (ert-info ("A plain collection stops at the conflict")
-        (should-error (llm-pick-collect) :type 'llm-pick-align-conflict))
-      (cl-letf (((symbol-function 'llm-pick--report-display)
-                 (lambda (text) (setq shown text) text)))
-        (ert-info ("The check command reports it and returns the text")
-          (should (string-match-p "ID alignment conflict"
-                                  (call-interactively #'llm-pick-align-check))))
-        (should (string-match-p "foo_bar" shown))))
-    (ert-info ("Nothing is left in the session problem list")
-      (should (equal llm-pick-align--problems nil)))))
-
 (provide 'llm-pick-report-test)
 
 ;;; llm-pick-report-test.el ends here

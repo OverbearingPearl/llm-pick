@@ -181,7 +181,10 @@ KIND is the alignment kind; SCORE and BEST are optional similarity scores."
       (ert-info ("An ID that decided nothing is counted, not listed")
         (should (string-match-p "1 ID normalizes to the anchor's model already"
                                 text))
-        (should-not (string-match-p "vendor/one" text))))))
+        (should-not (string-match-p "An ID that decided nothing\\(?:.*\n\\)*.*vendor/one" text)))
+      (ert-info ("The merged-ID section groups every ID under its canonical model")
+        (should (string-match-p "one\\(?:.*\n\\)*.*vendor/one" text))
+        (should-not (string-match-p "vendor/one.*\n.*two" text))))))
 
 (ert-deftest llm-pick-render-test-alignment-names-source-id-and-normal-form ()
   ;; The point of the report: every decision shows the source, the ID as
@@ -203,26 +206,28 @@ KIND is the alignment kind; SCORE and BEST are optional similarity scores."
                  text))))))
 
 (ert-deftest llm-pick-render-test-alignment-hides-the-far-misses ()
-  ;; A live collection leaves hundreds of IDs the anchor never scored.
-  ;; Listing them buried the handful whose score sits just under the
-  ;; threshold, which are the only ones a reader can act on.
+  ;; With the always-full renderer, the report lists every unmatched ID,
+  ;; near or far, in a single unmatched section.
   (let ((llm-pick-align-match-threshold 0.85))
     (let ((text (llm-pick-render-report-alignment llm-pick-render-test--alignment)))
-      (ert-info ("The near miss is listed, the far one is only counted")
+      (ert-info ("Every unmatched ID is listed, including the far one")
         (should (string-match-p "vendor/four" text))
-        (should-not (string-match-p "vendor/far" text))
-        (should (string-match-p "1 ID further away" text)))
-      (ert-info ("The totals count both: the section names every unmatched ID")
+        (should (string-match-p "vendor/far" text)))
+      (ert-info ("The far ID appears after the unmatched section heading")
+        (should (string-match-p
+                 "=== Matched no model of the anchor source (2) ===\\(?:.\\|\n\\)*vendor/far"
+                 text)))
+      (ert-info ("The totals count both unmatched IDs with no near/far split")
         (should (string-match-p "Matched no model of the anchor source (2)"
                                 text))
-        (should (string-match-p "1 ID within 0.10 of a match" text))))))
+        (should-not (string-match-p "1 ID within 0\\.10 of a match" text))
+        (should-not (string-match-p "1 ID further away" text))))))
 
 (ert-deftest llm-pick-render-test-alignment-can-list-the-undecided-ids ()
-  ;; `C-u M-x llm-pick-align-report' lists them, because a normalization
-  ;; rule that drops too much is exactly what lands an ID on a model that
-  ;; is spelled like it and is not it.
+  ;; 低阈值会把拼写相近但实际不同的 ID 归一化后错误匹配到某个模型上，
+  ;; 所以 report 必须能把这些未决 ID 列出来。
   (let ((llm-pick-align-match-threshold 0.85))
-    (let ((text (llm-pick-render-report-alignment llm-pick-render-test--alignment t)))
+    (let ((text (llm-pick-render-report-alignment llm-pick-render-test--alignment)))
       (ert-info ("The undecided ID is listed with its normalized form")
         (should (string-match-p "vendor/one\\s-+one\\s-+one" text)))
       (ert-info ("Every section is still there")
@@ -230,8 +235,9 @@ KIND is the alignment kind; SCORE and BEST are optional similarity scores."
         (should (string-match-p "vendor/four" text))))))
 
 (ert-deftest llm-pick-render-test-alignment-can-list-every-unmatched-id ()
-  ;; With ALL non-nil even entries far below the near-miss band are
-  ;; listed, so nothing silently disappears from the report.
+  ;; The full-list section of the report now always renders every
+  ;; unmatched id, even ones far below the near-miss band, so nothing
+  ;; silently disappears.
   (let ((entry (list :kind 'unmatched
                      :id "vendor/far"
                      :norm "vendor far far"
@@ -239,36 +245,18 @@ KIND is the alignment kind; SCORE and BEST are optional similarity scores."
                      :score 0.3)))
     (let ((report (list :entries (list entry)
                         :mapping (list (cons (cons "openrouter" "vendor/far") "vendor/far")))))
-      (ert-info ("With ALL t the far-below-band entry is listed")
-        (let ((text (llm-pick-render-report-alignment report t)))
-          (should (string-match-p "vendor far far" text))))
-      (ert-info ("With ALL nil it stays hidden, as today")
-        (let ((text (llm-pick-render-report-alignment report nil)))
-          (should-not (string-match-p "vendor far far" text)))))))
+      (ert-info ("The far-below-band entry is always listed")
+        (let ((text (llm-pick-render-report-alignment report)))
+          (should (string-match-p "vendor far far" text)))))))
 
 (ert-deftest llm-pick-render-test-alignment-leaves-the-report-alone ()
   (let ((llm-pick-align-match-threshold 0.85)
         (entries (copy-sequence (plist-get llm-pick-render-test--alignment
                                            :entries))))
-    (llm-pick-render-report-alignment llm-pick-render-test--alignment t)
+    (llm-pick-render-report-alignment llm-pick-render-test--alignment)
     (ert-info ("Rendering sorts copies, so the caller's list keeps its order")
       (should (equal (plist-get llm-pick-render-test--alignment :entries)
                      entries)))))
-
-(ert-deftest llm-pick-render-test-problems-are-grouped-by-kind ()
-  (ert-info ("Each kind gets its own heading and count")
-    (let ((text (llm-pick-render-report-problems
-                 '((:type llm-pick-align-conflict :description "first conflict")
-                   (:type llm-pick-align-conflict :description "second conflict")
-                   (:type llm-pick-align-unmatched :description "one miss")))))
-      (should (string-match-p "3 problems in this run" text))
-      (should (string-match-p (regexp-quote "ID alignment conflict (2)") text))
-      (should (string-match-p (regexp-quote "ID without a match (1)") text))
-      (should (string-match-p "second conflict" text))
-      (ert-info ("A description keeps its own line breaks, indented")
-        (should (string-match-p "^  first conflict" text)))))
-  (ert-info ("A run without a problem says so instead of showing nothing")
-    (should (string-match-p "No problem" (llm-pick-render-report-problems nil)))))
 
 (ert-deftest llm-pick-render-test-benchmark-groups-by-output-price-ratio ()
   (let* ((llm-pick-core-default-capability-source 'benchlm)

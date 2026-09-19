@@ -23,8 +23,7 @@
 ;; and q goes back one level.  The header line names the keys of the
 ;; view you are in.
 ;;
-;; The records behind the views are collected once and cached on disk
-;; for `llm-pick-view-cache-ttl' seconds (24 hours by default), so
+;; The records behind the views are collected once per session, so
 ;; repeated views open instantly and no source is downloaded twice.
 ;; `C-u M-x llm-pick' throws the cache away and fetches everything
 ;; again, all sources in one go.
@@ -59,20 +58,6 @@
   "Face used to distinguish the column legend from the entries."
   :group 'llm-pick-view)
 
-(defcustom llm-pick-view-cache-ttl 3600
-  "Seconds a collected set of records stays fresh on disk.
-OpenRouter time-of-day overrides change a model's price every hour
-\&, so one hour is the longest a cached record set can be
-trusted.
-3600 is one hour: within it, opening a view downloads nothing; past
-it, the prices may belong to a different UTC override window."
-  :type 'number)
-
-(defcustom llm-pick-view-cache-dir
-  (locate-user-emacs-file "llm-pick-cache")
-  "Directory holding the fetched records between sessions."
-  :type 'directory)
-
 (defcustom llm-pick-view-cheaper-bands '(0.9 0.8 0.5)
   "Output price ratios naming the cheaper bands of a model view."
   :type '(repeat number))
@@ -105,56 +90,19 @@ ascending; repeating the same sort key toggles this.")
 
 ;;; Collection cache
 
-(defun llm-pick-view--cache-file ()
-  "Return the file the records are cached in."
-  (expand-file-name "records.el" llm-pick-view-cache-dir))
-
-(defun llm-pick-view--cache-fresh-p ()
-  "Return non-nil when the on-disk cache is younger than the TTL."
-  (let* ((file (llm-pick-view--cache-file))
-         (attrs (and (file-exists-p file) (file-attributes file))))
-    (and attrs
-         (< (float-time (time-subtract (current-time) (nth 5 attrs)))
-            llm-pick-view-cache-ttl))))
-
-(defun llm-pick-view-clear-cache ()
-  "Delete the on-disk records cache and drop the in-memory one."
-  (interactive)
-  (let ((file (llm-pick-view--cache-file)))
-    (when (file-exists-p file)
-      (delete-file file))
-    (setq llm-pick-view--records nil)
-    (if (file-exists-p file)
-        (message "Cache file %s could not be deleted" file)
-      (message "Cache cleared%s" (if (file-exists-p file) "" "")))))
-
-(defun llm-pick-view--save-cache (records)
-  "Write RECORDS to the cache file, ignoring write errors."
-  (condition-case nil
-      (progn
-        (make-directory llm-pick-view-cache-dir t)
-        (with-temp-file (llm-pick-view--cache-file)
-          (prin1 records (current-buffer))))
-    (error nil)))
-
 (defun llm-pick-view--models (&optional refresh)
-  "Return the model records, fetching every source at most once a day.
-A nil REFRESH reads the in-memory set, then the on-disk cache, and
-only when both are missing or stale calls `llm-pick-source--collect',
-which visits every registered source.  A non-nil REFRESH throws both
-caches away first."
+  "Return the model records, collecting when memory is empty.
+The in-memory set survives between views; any call with a non-nil
+REFRESH, and the first call of a session, collect from every
+registered source.  There is no on-disk cache: collecting again is
+the only way the records update."
   (cond ((and (not refresh) llm-pick-view--records))
-        ((and (not refresh) (llm-pick-view--cache-fresh-p))
-         (setq llm-pick-view--records
-               (with-temp-buffer
-                 (insert-file-contents (llm-pick-view--cache-file))
-                 (read (current-buffer)))))
         (t
          ;; `llm-pick-collect' lives in `llm-pick.el', which requires this
          ;; module, so the view calls the collector underneath it instead of
          ;; making the dependency circular.
-         (setq llm-pick-view--records (llm-pick-source--collect :category (list nil "agentic" "coding" "reasoning" "multimodalGrounded" "knowledge" "multilingual" "instructionFollowing" "math" "intelligence")))
-         (llm-pick-view--save-cache llm-pick-view--records)
+         (setq llm-pick-view--records
+               (llm-pick-source--collect :category (list nil "agentic" "coding" "reasoning" "multimodalGrounded" "knowledge" "multilingual" "instructionFollowing" "math" "intelligence")))
          llm-pick-view--records)))
 
 ;;; Record helpers
@@ -191,15 +139,20 @@ a 0 price from a non-openrouter source renders as \" --.---\" (the
 zero/unknown marker), an openrouter 0 renders as \"  0.000\".  The
 in, cached-in and out halves are joined with '/' into a 23-character
 cell.  The price cells are for the default price source, named by the
-variable llm-pick-core-default-price-source, followed by the
+variable `llm-pick-core-default-price-source', followed by the
 secondary price source, named by the variable
-llm-pick-core-secondary-price-source.  Both names are resolved
+`llm-pick-core-secondary-price-source'.  Both names are resolved
 dynamically here since those variables live in llm-pick.el.  The
 name, score and id columns keep their fixed widths (the name
 column is 50 characters wide, and longer display names are
 truncated to 50 characters so that all columns stay aligned, and
 the id column is left-aligned at 24 characters) so they
-still line up with the header from llm-pick-view--insert-columns."
+still line up with the header from `llm-pick-view--insert-columns'.
+If the record has a :provider-aliases entry (a plain list of
+OpenRouter ID strings), the id column renders
+\"alias1 -> alias2 -> winner\" (aliases first, winner last) instead
+of the winner alone; duplicates among the aliases are removed
+before rendering; otherwise it renders the winner unchanged."
   (let* ((default-price (symbol-value 'llm-pick-core-default-price-source))
          (secondary-price (symbol-value 'llm-pick-core-secondary-price-source))
          (benchlm-categories '("agentic" "coding" "reasoning" "multimodalGrounded"
@@ -234,6 +187,21 @@ still line up with the header from llm-pick-view--insert-columns."
                 (or (plist-get record :display-name)
                     (llm-pick-core--field record 'name))
                 50))
+         (winner-id (or (cdr (assq 'openrouter (plist-get record :providers)))
+                        "-"))
+         (aliases (plist-get record :provider-aliases))
+         (deduped-aliases (when (and aliases (listp aliases))
+                            (let ((seen nil))
+                              (delq nil
+                                    (mapcar (lambda (a)
+                                              (unless (or (member a seen)
+                                                          (equal a winner-id))
+                                                (push a seen)
+                                                a))
+                                            aliases)))))
+         (id (if deduped-aliases
+                 (mapconcat #'identity (append deduped-aliases (list winner-id)) " -> ")
+               winner-id))
          (cells (append
                  (list (format "%-48s" name))
                  (list (format "%9s"
@@ -250,9 +218,7 @@ still line up with the header from llm-pick-view--insert-columns."
                                  aa-categories)))
                  (list (funcall price-triple default-price))
                  (list (funcall price-triple secondary-price))
-                 (list (format "%-24s"
-                               (or (cdr (assq 'openrouter (plist-get record :providers)))
-                                   "-"))))))
+                 (list (format "%-24s" id)))))
     (mapconcat #'identity cells "  ")))
 
 ;;; Rendering primitives

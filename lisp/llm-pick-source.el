@@ -293,7 +293,11 @@ input price; :cache is nil when the provider does not quote one."
 (defun llm-pick-source--openrouter-loader (_options)
   "Return the entries of the OpenRouter model list.
 OPTIONS is ignored: the endpoint answers with every model at once, so a
-category does not change the answer."
+category does not change the answer.
+For a ~-prefixed alias the :providers slot still carries the raw alias
+ID; when the merge folds the alias into its canonical slug entry the
+raw ID is demoted to :provider-aliases, so the main view can show both
+as \"slug <- ~alias\"."
   (cl-flet ((normalized-name (name)
               "Strip a leading \"Vendor: \" prefix from NAME, BenchLM style.
 Only the first colon followed by a space counts, so names like
@@ -326,6 +330,7 @@ Only the first colon followed by a space counts, so names like
                                       (or (llm-pick-source--json-field model "name")
                                           canonical-id))
                                      :providers (list (cons 'openrouter id)))
+                               (when slug (list :alias t))
                                (let ((prices (llm-pick-source--openrouter-prices model)))
                                  (when prices (list :prices prices))))))))
 
@@ -438,13 +443,28 @@ NAMES."
       default-source)
      (t (car names)))))
 
-(defun llm-pick-source--merge-entry (record source entry)
+(defun llm-pick-source--merge-entry (record source entry &optional quality)
   "Return RECORD after merging one ENTRY of SOURCE into it.
 A source contributes at most one score, one price plist and one ID per
-provider; the first entry that reaches a canonical ID wins.  An entry
-with a :category is keyed by the pair (SOURCE . CATEGORY) so its column
-can be read per category; only an entry without a category is keyed by
-SOURCE."
+provider; the best-attested entry of a source wins each slot (see
+QUALITY).  An entry with a :category is keyed by the pair
+\\(SOURCE . CATEGORY\\) so its column can be read per category; only an
+entry without a category is keyed by SOURCE.
+
+QUALITY is a number (higher means a better-attested ID, as computed by
+the caller from the alignment entry's kind and score).  For providers,
+the best-attested ID wins the provider slot rather than the first: the
+quality of the ID each provider name currently holds is tracked in the
+record's :provider-rank alist as (PROVIDER-NAME . QUALITY).  Only an
+entry whose :alias is non-nil contributes to the record's
+:provider-aliases list: aliases are the source's own alias IDs (such as
+a ~-prefixed latest alias), never the concrete IDs merged into the
+record itself.  Every alias that loses the provider slot, whether it
+came before the winner or after it, is kept so that the main view can
+show the alias pointing at the concrete version it was merged into.
+Aliases are deduplicated: repeated merges (one per category, into the
+same record) never stack the same alias, and an alias never repeats the
+current winner's ID."
   (let* ((score (plist-get entry :score))
          (category (plist-get entry :category))
          (score-key (if category
@@ -453,20 +473,62 @@ SOURCE."
          (prices (plist-get entry :prices))
          (providers (plist-get entry :providers))
          (name (plist-get entry :display-name))
+         (aliasp (plist-get entry :alias))
          (scores (plist-get record :scores))
          (record-prices (plist-get record :prices))
-         (record-providers (plist-get record :providers)))
+         (record-providers (plist-get record :providers))
+         (provider-rank (plist-get record :provider-rank))
+         (provider-aliases (plist-get record :provider-aliases))
+         alias-candidate
+         winner-id)
     (when (and score (null (assoc score-key scores)))
       (setq scores (append scores (list (cons score-key score)))))
     (when (and prices (null (alist-get source record-prices)))
       (setq record-prices (append record-prices (list (cons source prices)))))
     (dolist (provider providers)
-      (unless (assq (car provider) record-providers)
-        (setq record-providers (append record-providers (list provider)))))
+      (let* ((provider-name (car provider))
+             (stored (assq provider-name record-providers))
+             (stored-quality (cdr (assq provider-name provider-rank))))
+        (cond
+         ((null stored)
+          (setq record-providers (append record-providers (list provider))
+                provider-rank (append provider-rank
+                                      (list (cons provider-name
+                                                  (or quality 0))))
+                winner-id (cdr provider)))
+         ((and quality (numberp stored-quality)
+               (> quality stored-quality))
+          ;; A better-attested ID takes the provider slot; an alias it
+          ;; displaces stays on as an alias.
+          (setq alias-candidate (and aliasp (cdr stored))
+                record-providers (append (delete stored record-providers)
+                                         (list provider))
+                provider-rank (cons (cons provider-name quality)
+                                    (assq-delete-all provider-name
+                                                     provider-rank))
+                winner-id (cdr provider)))
+         (t
+          ;; A lesser-attested ID keeps its alias next to the winner.
+          (setq alias-candidate (and aliasp (cdr provider))
+                winner-id (cdr stored))))
+        (when alias-candidate
+          ;; Drop the candidate if it is the ID currently in (or being
+          ;; installed into) the provider slot, so the winner itself
+          ;; never lands in the alias list.
+          (unless (equal alias-candidate winner-id)
+            ;; Drop the candidate if already recorded as an alias, so
+            ;; repeated merges do not stack.
+            (setq provider-aliases
+                  (append (delete alias-candidate provider-aliases)
+                          (list alias-candidate))))
+          (setq alias-candidate nil))))
+    (setq provider-aliases (delete-dups provider-aliases))
     ;; A record always carries these keys, so `plist-put' updates in place.
     (plist-put record :scores scores)
     (plist-put record :prices record-prices)
     (plist-put record :providers record-providers)
+    (plist-put record :provider-rank provider-rank)
+    (plist-put record :provider-aliases provider-aliases)
     ;; Keep the canonical ID as display name until a source names it.
     (when (and name (equal (plist-get record :display-name)
                            (plist-get record :canonical)))
@@ -487,9 +549,27 @@ SOURCE."
   "Merge the per-source ENTRIES into model records using REPORT.
 ENTRIES is an alist (SOURCE . ENTRY-LIST), REPORT comes from
 `llm-pick-align--align' and CATEGORIES lists the categories the entries were
-loaded for.  Return the records ordered by canonical ID."
+loaded for.  Alias entries are ranked half an exact one so that the concrete
+slug always outranks its ~-prefixed alias.  Return the records ordered by
+canonical ID."
   (let ((by-canonical (make-hash-table :test #'equal))
+        (quality (make-hash-table :test #'equal))
         canonicals)
+    (dolist (aligned (plist-get report :entries))
+      (let* ((kind (plist-get aligned :kind))
+             (kind-rank (cond
+                         ((eq kind 'exact) 3)
+                         ((eq kind 'agreed) 2)
+                         ((eq kind 'fuzzy) 1)
+                         (t 0)))
+             (kind-rank (if (plist-get aligned :alias)
+                            (* 0.5 kind-rank)
+                          kind-rank))
+             (pair (cons (plist-get aligned :source)
+                         (plist-get aligned :id))))
+        (puthash pair
+                 (+ (* 10 kind-rank) (or (plist-get aligned :score) 0))
+                 quality)))
     (dolist (source-entry entries)
       (let ((source (car source-entry)))
         (dolist (entry (cdr source-entry))
@@ -506,7 +586,9 @@ loaded for.  Return the records ordered by canonical ID."
                                                     :categories categories))
                 (puthash canonical record by-canonical)
                 (push canonical canonicals))
-              (llm-pick-source--merge-entry record source entry))))))
+              (llm-pick-source--merge-entry record source entry
+                                            (gethash (cons source id)
+                                                     quality 0)))))))
     (mapcar (lambda (canonical)
               (llm-pick-source--finalize (gethash canonical by-canonical)))
             (sort canonicals #'string<))))

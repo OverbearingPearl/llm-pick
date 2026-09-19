@@ -520,7 +520,7 @@ them on a model that is spelled like them and is not them."
                   (format "%s" (plist-get entry :canonical))))
           entries))
 
-(defun llm-pick-render-report-alignment (report &optional all)
+(defun llm-pick-render-report-alignment (report)
   "Return REPORT, the plist `llm-pick-align--align' returned, as text.
 
 The report is written to be read by the person who has to accept or
@@ -538,12 +538,10 @@ decision:
                                 does not track the model
 
 An ID that already normalizes to the anchor's model decided nothing and
-is counted, not listed; pass ALL to list those as well, because a rule
-that drops too much shows there and nowhere else.  Of the unmatched IDs
-only those within `llm-pick-render-report--near-miss-band' of
-`llm-pick-align-match-threshold' are listed; pass ALL to list every
-unmatched ID as well, including those beyond the band.  The report the
-caller passed in is not modified."
+is counted, not listed.  Every unmatched ID is listed, whether near the
+match threshold or far from it, so a rule that drops too much shows
+there, and so does an anchor that does not track a model at all.  The
+report the caller passed in is not modified."
   (let* ((threshold (symbol-value 'llm-pick-align-match-threshold))
          (entries (plist-get report :entries))
          (mapping (plist-get report :mapping))
@@ -558,13 +556,15 @@ caller passed in is not modified."
          (fuzzy (llm-pick-render-report--entries-of-kind entries 'fuzzy))
          (agreed (llm-pick-render-report--entries-of-kind entries 'agreed))
          (unmatched (llm-pick-render-report--entries-of-kind entries 'unmatched))
-         (near (cl-remove-if-not
-                (lambda (entry)
-                  (<= (- threshold
-                         (or (plist-get entry :score) 0.0))
-                      llm-pick-render-report--near-miss-band))
-                unmatched))
-         (far (- (length unmatched) (length near))))
+         (merged (append exact fuzzy agreed))
+         (merged-in-order
+          (cl-remove-if-not
+           (lambda (entry)
+             (memq (plist-get entry :kind) '(exact fuzzy agreed)))
+           entries))
+         (by-canonical (when merged-in-order
+                         (llm-pick-render-report--group-by-canonical
+                          merged-in-order))))
     (concat
      (format "=== ID alignment ===\n\n%s from %s onto %s\n  %s named by more than one source\n  %s named by one source only\n  %s normalizes to the anchor's model already, with nothing to check\n"
              (llm-pick-render-report--count (length mapping) "ID")
@@ -598,35 +598,78 @@ caller passed in is not modified."
       (format "\n=== Matched no model of the anchor source (%d) ==="
               (length unmatched))
       (mapconcat #'identity
-                 (list (format "%s within %.2f of a match (threshold %.2f), listed below"
-                               (llm-pick-render-report--count (length near) "ID")
-                               llm-pick-render-report--near-miss-band
-                               threshold)
-                       (format "%s further away: the anchor does not track them"
-                               (llm-pick-render-report--count far "ID")))
+                 (list (format "These are all the unmatched IDs, near the match threshold %.2f or far from it; listed so the normalized form of each can be checked."
+                               threshold))
                  "\n")
       llm-pick-render-report--unmatched-headers
-      (llm-pick-render-report--unmatched-rows near) '(4))
-     (when all
-       (llm-pick-render-report--section
-        (format "\n=== Matched no model, full list (%d) ==="
-                (length unmatched))
-        (mapconcat #'identity
-                   (list (format "These are the IDs beyond the near-miss band of %.2f, listed for review of their normalized form because the caller asked for the full list."
-                                 llm-pick-render-report--near-miss-band))
-                   "\n")
-        llm-pick-render-report--unmatched-headers
-        (llm-pick-render-report--unmatched-rows unmatched) '(4)))
-     (when all
-       (llm-pick-render-report--section
-        (format "\n=== Normalized to the anchor's model (%d) ===" (length exact))
-        (mapconcat #'identity
-                   '("Nothing was decided for these IDs.  They are the place to look"
-                     "when a rule of `llm-pick-normalize-rules' drops too much: an ID"
-                     "lands here beside a model that is spelled like it and is not it.")
-                   "\n")
-        llm-pick-render-report--exact-headers
-        (llm-pick-render-report--exact-rows exact) nil)))))
+      (llm-pick-render-report--unmatched-rows unmatched) '(4))
+     (llm-pick-render-report--section
+      (format "\n=== Normalized to the anchor's model (%d) ===" (length exact))
+      (mapconcat #'identity
+                 '("Nothing was decided for these IDs.  They are the place to look"
+                   "when a rule of `llm-pick-normalize-rules' drops too much: an ID"
+                   "lands here beside a model that is spelled like it and is not it.")
+                 "\n")
+      llm-pick-render-report--exact-headers
+      (llm-pick-render-report--exact-rows exact) nil)
+     (when merged
+       (concat
+        (format "\n=== Canonical models and their merged IDs (%d) ===\n"
+                (length by-canonical))
+        (mapconcat
+         #'identity
+         (list
+          "The ID marked \"<- main view\" is the best-attested one of that"
+          "source: among the IDs the source contributed to this model, exact"
+          "normalization outranks agreement among sources, which outranks a"
+          "similarity score, and a higher score breaks the tie.  The main"
+          "view's provider column shows that ID for its source.  The other"
+          "IDs of the same source were merged too, but are not displayed in"
+          "the main view.")
+         "\n")
+        "\n"
+        (mapconcat
+         (lambda (group)
+           (let ((canonical (car group))
+                 (group-entries (cdr group)))
+             (concat
+              (format "%s  %s"
+                      canonical
+                      (llm-pick-render-report--count (length group-entries)
+                                                     "ID"))
+              (let ((best (make-hash-table :test #'equal))
+                    (quality (make-hash-table :test #'equal)))
+                ;; First pass: decide the best-attested entry per source.
+                (dolist (entry group-entries)
+                  (let* ((source (plist-get entry :source))
+                         (q (+ (pcase (plist-get entry :kind)
+                                 ('exact 3) ('agreed 2) ('fuzzy 1)
+                                 (_ 0))
+                               (or (plist-get entry :score) 0))))
+                    (when (and source
+                               (or (not (gethash source quality))
+                                   (> q (gethash source quality))))
+                      (puthash source q quality)
+                      (puthash source entry best))))
+                ;; Second pass: format each line, marking only the entry
+                ;; that survived the first pass for its source.
+                (mapconcat
+                 (lambda (entry)
+                   (let ((source (plist-get entry :source)))
+                     (format "\n  %s (%s%s)%s"
+                             (plist-get entry :id)
+                             (plist-get entry :kind)
+                             (if (plist-get entry :score)
+                                 (format ", %.2f" (plist-get entry :score))
+                               "")
+                             (if (and source
+                                      (eq entry (gethash source best)))
+                                 " <- main view"
+                               ""))))
+                 group-entries
+                 "")))))
+         by-canonical
+         "\n"))))))
 
 (defun llm-pick-render-report--indent (text columns)
   "Return TEXT with every line indented by COLUMNS spaces."
@@ -640,35 +683,6 @@ caller passed in is not modified."
       (let ((type (plist-get problem :type)))
         (unless (memq type types)
           (push type types))))))
-
-(defun llm-pick-render-report-problems (problems)
-  "Return PROBLEMS, what `llm-pick-align-check' collected, as text.
-PROBLEMS is a list of plists as `llm-pick-align--problem' builds them.
-The list is grouped by kind, because a run that trips one check several
-times needs one edit per kind, not one edit per ID."
-  (if (null problems)
-      (concat "=== ID problems ===\n\n"
-              "No problem: every ID normalized to a canonical ID of its own, "
-              "and no match of an ID was ambiguous.\n")
-    (concat
-     (format "=== ID problems ===\n\n%s in this run; every group below is one rule or one threshold to revisit.\n"
-             (llm-pick-render-report--count (length problems) "problem"))
-     (mapconcat
-      (lambda (type)
-        (let ((group (cl-remove-if-not
-                      (lambda (problem) (eq (plist-get problem :type) type))
-                      problems)))
-          (concat
-           (format "\n%s (%d)\n\n"
-                   (or (get type 'error-message) (format "%s" type))
-                   (length group))
-           (mapconcat (lambda (problem)
-                        (llm-pick-render-report--indent
-                         (plist-get problem :description) 2))
-                      group "\n\n")
-           "\n")))
-      (llm-pick-render-report--problem-types problems)
-      ""))))
 
 (defun llm-pick-render-report-text (models columns &optional format)
   "Return MODELS rendered as text in FORMAT.

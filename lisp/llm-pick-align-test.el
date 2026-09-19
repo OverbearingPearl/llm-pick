@@ -268,60 +268,6 @@
       (should (string-match-p "both normalize to foo-bar" (car data)))
       (should (string-match-p (regexp-quote "_+") (car data))))))
 
-(ert-deftest llm-pick-align-test-a-collecting-run-reports-every-problem ()
-  ;; Only unmistakable misses are used here.  An ID such as `x/foo-bar'
-  ;; is a substring of `foo-bar' yet covers 7 of its 8 characters, and
-  ;; `llm-pick-align-similarity-substring' scales by that coverage, so it
-  ;; reaches only 0.90 * 7/8 = 0.7875, below the threshold, and is an
-  ;; unmatched ID too.  That is the intended reading of a near miss, but
-  ;; it would make this test report three problems instead of the two it
-  ;; is about.
-  (let ((llm-pick-align-match-threshold 0.85)
-        (llm-pick-align-match-ambiguity-gap 0.05)
-        (llm-pick-align-on-unmatched 'error)
-        (llm-pick-align--collecting t)
-        (llm-pick-align--problems nil))
-    (llm-pick-align--align '((benchlm . ("foo-bar" "foo_bar"))
-                       (openrouter . ("some/unknown-model-xyz"
-                                      "another/unknown-model-abc")))
-                     'benchlm)
-    (ert-info ("The conflict and both unmatched IDs are reported, in order")
-      (should (equal (mapcar (lambda (problem) (plist-get problem :type))
-                             (reverse llm-pick-align--problems))
-                     '(llm-pick-align-conflict
-                       llm-pick-align-unmatched
-                       llm-pick-align-unmatched))))
-    (ert-info ("Every ID is named, not only the last one of its kind")
-      (let ((text (mapconcat (lambda (problem)
-                               (plist-get problem :description))
-                             llm-pick-align--problems "\n")))
-        (should (string-match-p "some/unknown-model-xyz" text))
-        (should (string-match-p "another/unknown-model-abc" text))))))
-
-(ert-deftest llm-pick-align-test-a-collecting-run-still-maps-every-id ()
-  ;; A collecting run has to produce records as well, so an ID a
-  ;; reported collision left out of the anchor index still needs a
-  ;; canonical ID of its own.
-  (let ((llm-pick-align--collecting t)
-        (llm-pick-align--problems nil))
-    (let ((report (llm-pick-align--align '((benchlm . ("foo-bar" "foo_bar"))
-                                     (openrouter . ("x/foo-bar")))
-                                   'benchlm)))
-      (ert-info ("Every input ID has a mapping entry, in input order")
-        (should (equal (mapcar #'car (plist-get report :mapping))
-                       '((benchlm . "foo-bar") (benchlm . "foo_bar")
-                         (openrouter . "x/foo-bar")))))
-      (ert-info ("The colliding IDs share the canonical ID of the first")
-        (should (equal (cdr (assoc '(benchlm . "foo_bar")
-                                   (plist-get report :mapping)))
-                       "foo-bar")))
-      (ert-info ("The colliding anchor IDs share one canonical ID, the rest keep their own")
-        ;; `x/foo-bar' is a substring of `foo-bar' but covers only 7 of its
-        ;; 8 characters, which the threshold rejects, so it stays a model
-        ;; of its own instead of becoming a second name for `foo-bar'.
-        (should (equal (delete-dups (mapcar #'cdr (plist-get report :mapping)))
-                       '("foo-bar" "x-foo-bar")))))))
-
 (ert-deftest llm-pick-align-test-sources-that-agree-settle-a-near-miss ()
   ;; The leaderboard calls it `Mistral Large 3', the stores call it
   ;; `mistral-large', a date they strip on the way in.  The prefix match
@@ -417,17 +363,6 @@
         (should (equal (plist-get report :promoted) nil))
         (should (equal (plist-get report :standalone)
                        '("mistral-large")))))))
-
-(ert-deftest llm-pick-align-test-a-conflict-points-at-the-check-command ()
-  (ert-info ("The message says how to see every problem at once")
-    (let ((message (error-message-string
-                    (condition-case err
-                        (progn (llm-pick-align--align '((benchlm . ("foo-bar"
-                                                              "foo_bar")))
-                                                'benchlm)
-                               nil)
-                      (llm-pick-align-conflict err)))))
-      (should (string-match-p "llm-pick-align-check" message)))))
 
 (ert-deftest llm-pick-align-test-a-token-less-pair-still-ranks ()
   ;; The token rule used to answer 0 when two IDs share no token, and 0
