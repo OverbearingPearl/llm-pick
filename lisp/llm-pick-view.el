@@ -357,7 +357,7 @@ BODY is a function inserting the buffer content."
   "Return the record under the cursor, or nil."
   (get-text-property (point) 'llm-pick-record))
 
-(defun llm-pick-view-next (&optional count)
+(defun llm-pick-view--next (&optional count)
   "Move down COUNT entries, to the next model line."
   (interactive "p")
   (dotimes (_ (or count 1))
@@ -365,7 +365,7 @@ BODY is a function inserting the buffer content."
     (while (and (not (eobp)) (not (llm-pick-view--entry-at-point)))
       (forward-line 1))))
 
-(defun llm-pick-view-previous (&optional count)
+(defun llm-pick-view--previous (&optional count)
   "Move up COUNT entries, to the previous model line."
   (interactive "p")
   (dotimes (_ (or count 1))
@@ -373,7 +373,7 @@ BODY is a function inserting the buffer content."
     (while (and (not (bobp)) (not (llm-pick-view--entry-at-point)))
       (forward-line -1))))
 
-(defun llm-pick-view-forward-section ()
+(defun llm-pick-view--forward-section ()
   "Move to the next section header."
   (interactive)
   (forward-line 1)
@@ -381,7 +381,7 @@ BODY is a function inserting the buffer content."
               (not (get-text-property (point) 'llm-pick-header)))
     (forward-line 1)))
 
-(defun llm-pick-view-backward-section ()
+(defun llm-pick-view--backward-section ()
   "Move to the previous section header."
   (interactive)
   (forward-line -1)
@@ -394,17 +394,17 @@ BODY is a function inserting the buffer content."
 (defvar llm-pick-view-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
-    (define-key map "n" 'llm-pick-view-next)
-    (define-key map "p" 'llm-pick-view-previous)
-    (define-key map "j" 'llm-pick-view-next)
-    (define-key map "k" 'llm-pick-view-previous)
-    (define-key map "f" 'llm-pick-view-forward-section)
-    (define-key map "b" 'llm-pick-view-backward-section)
-    (define-key map (kbd "RET") 'llm-pick-view-ret)
-    (define-key map "q" 'llm-pick-view-quit)
+    (define-key map "n" 'llm-pick-view--next)
+    (define-key map "p" 'llm-pick-view--previous)
+    (define-key map "j" 'llm-pick-view--next)
+    (define-key map "k" 'llm-pick-view--previous)
+    (define-key map "f" 'llm-pick-view--forward-section)
+    (define-key map "b" 'llm-pick-view--backward-section)
+    (define-key map (kbd "RET") 'llm-pick-view--ret)
+    (define-key map "q" 'llm-pick-view--quit)
     (define-key map "g" 'llm-pick-view-refresh)
     ;; One key per sortable column; a repeat of the same key flips
-    ;; the direction (see `llm-pick-view-sort-toggle').
+    ;; the direction (see `llm-pick-view--sort-toggle').
     ;; N = name, S = overall score, A/C/R/m/K/l/s/a = BenchLM category,
     ;; i/o/e = OpenRouter category, I/c/O = BenchLM prices,
     ;; u/h/t = OpenRouter prices.
@@ -429,12 +429,9 @@ BODY is a function inserting the buffer content."
                     ("t" . (openrouter . out))))
       (define-key map (car spec)
                   (lambda () (interactive)
-                    (llm-pick-view-sort-toggle (cdr spec)))))
+                    (llm-pick-view--sort-toggle (cdr spec)))))
     map)
   "Keymap of `llm-pick-view-mode'.")
-
-(defvar llm-pick-view--jump-target nil
-  "Record the view returns to with `q', when it is not the parent.")
 
 (define-derived-mode llm-pick-view-mode special-mode "llm-pick-view"
   "Major mode of the `llm-pick' main, model and compare views."
@@ -467,20 +464,6 @@ become \"\" / -1), avoiding mixed-type comparison errors."
                          (> ka kb))))
             (if llm-pick-view--reverse (not less) less)))))
 
-(defun llm-pick-view--key-face ()
-  "Face for key hints: red, underlined, and bold."
-  (let ((face (make-face 'llm-pick-view-key-face)))
-    (set-face-foreground face "red")
-    (set-face-underline face t)
-    (set-face-bold face t)
-    face))
-
-(defun llm-pick-view--key-hint (prefix key suffix)
-  "Concatenate PREFIX, KEY, and SUFFIX into a hint fragment.
-KEY is given the keybinding face."  (concat prefix
-          (propertize key 'face (llm-pick-view--key-face))
-          suffix))
-
 (defun llm-pick-view--sort-key (record)
   "Return the sort key of RECORD for the current `llm-pick-view--order'.
 The order value is either a plain field symbol or a cons cell.
@@ -509,7 +492,7 @@ numeric keys and \"\" for name keys."
         (if (stringp key) "" -1)
       key)))
 
-(defun llm-pick-view-sort-toggle (order)
+(defun llm-pick-view--sort-toggle (order)
   "Re-render the main view sorted by ORDER.
 The first press sorts the column in its default direction
 \\(numeric columns strongest first, the name column ascending);
@@ -576,11 +559,6 @@ share first, then one section per source for what it lists alone."
          (llm-pick-view--insert-entries (cdr group)))))))
 
 ;;; Main view commands
-
-(defun llm-pick-view-sort (field)
-  "Re-render the main view sorted by FIELD, strongest first."
-  (setq llm-pick-view--order field)
-  (llm-pick-view-main))
 
 (defun llm-pick-view-refresh ()
   "Throw the cache away, fetch every source again and re-render."
@@ -707,20 +685,9 @@ result is an alist ((TITLE . MODELS)...), empty bands left out."
 
 ;;; Compare view
 
-(defun llm-pick-view--category-columns (records)
-  "Return the categories the capability scores of RECORDS are keyed by."
-  (let (categories)
-    (dolist (record records)
-      (dolist (key (plist-get record :scores))
-        (when (consp (car key))
-          (cl-pushnew (cdar key) categories :test #'equal))))
-    (nreverse categories)))
-
-;;; Side-by-side diff
-
 ;;; Dispatching
 
-(defun llm-pick-view-ret ()
+(defun llm-pick-view--ret ()
   "Open the model view of the model under the cursor."
   (interactive)
   (let ((record (llm-pick-view--entry-at-point)))
@@ -728,7 +695,7 @@ result is an alist ((TITLE . MODELS)...), empty bands left out."
         (llm-pick-view-model record)
       (user-error "Put the cursor on a model line first"))))
 
-(defun llm-pick-view-quit ()
+(defun llm-pick-view--quit ()
   "Go back one level: model to main, main to nothing."
   (interactive)
   (pcase llm-pick-view--kind

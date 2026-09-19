@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; ERT tests for `llm-pick-view--sort-key', `llm-pick-view--sort' and
-;; `llm-pick-view-sort-toggle': key-to-column mapping, sort direction
+;; `llm-pick-view--sort-toggle': key-to-column mapping, sort direction
 ;; and the flip on a repeated key.
 
 ;;; Code:
@@ -110,7 +110,7 @@ one."
   (let ((llm-pick-core-default-capability-source 'benchlm) (llm-pick-view--order nil)
         (llm-pick-view--reverse nil))
     (cl-letf (((symbol-function 'llm-pick-view-main) #'ignore))
-      (llm-pick-view-sort-toggle '(benchlm . "math"))
+      (llm-pick-view--sort-toggle '(benchlm . "math"))
       (should (equal llm-pick-view--order '(benchlm . "math")))
       (should (null llm-pick-view--reverse)))))
 
@@ -118,16 +118,16 @@ one."
   (let ((llm-pick-core-default-capability-source 'benchlm) (llm-pick-view--order '(benchlm . "math"))
         (llm-pick-view--reverse nil))
     (cl-letf (((symbol-function 'llm-pick-view-main) #'ignore))
-      (llm-pick-view-sort-toggle '(benchlm . "math"))
+      (llm-pick-view--sort-toggle '(benchlm . "math"))
       (should llm-pick-view--reverse)
-      (llm-pick-view-sort-toggle '(benchlm . "math"))
+      (llm-pick-view--sort-toggle '(benchlm . "math"))
       (should (null llm-pick-view--reverse)))))
 
 (ert-deftest llm-pick-view-sort-test-toggle-different-column-resets-flip ()
   (let ((llm-pick-core-default-capability-source 'benchlm) (llm-pick-view--order 'score)
         (llm-pick-view--reverse t))
     (cl-letf (((symbol-function 'llm-pick-view-main) #'ignore))
-      (llm-pick-view-sort-toggle '(openrouter . out))
+      (llm-pick-view--sort-toggle '(openrouter . out))
       (should (equal llm-pick-view--order '(openrouter . out)))
       (should (null llm-pick-view--reverse)))))
 
