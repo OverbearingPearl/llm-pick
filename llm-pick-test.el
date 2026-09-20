@@ -161,6 +161,10 @@ now."
           (dolist (symbol llm-pick-test--reset-vars)
             (when (boundp symbol)
               (makunbound symbol)))
+          ;; The JSON cache is a plain global that the unload/reload does
+          ;; not void, so a test that wrote the in-process cache would
+          ;; otherwise poison every later collect.
+          (setq llm-pick-source--json-cache nil)
           (load-file (expand-file-name "llm-pick.el" llm-pick-test--root))
           (dolist (file (llm-pick-test--module-files))
             (load-file file)))
@@ -175,10 +179,19 @@ now."
     (llm-pick-test--reload)
     (when (get-buffer "*ert*")
       (kill-buffer "*ert*"))
-    (let ((default-directory dir))
-      (if noninteractive
-          (ert-run-tests-batch-and-exit "llm-pick-")
-        (ert "llm-pick-")))))
+    (if noninteractive
+        (let ((failures 0))
+          ;; `ert-run-tests-batch-and-exit' kills Emacs inside the
+          ;; protected form, so an `unwind-protect' around it never
+          ;; runs its cleanup: run the suite without exiting, drop the
+          ;; JSON cache a test may have poisoned, and only then exit.
+          (setq failures (ert-run-tests-batch "llm-pick-"))
+          (setq llm-pick-source--json-cache nil)
+          (kill-emacs (if (zerop failures) 0 1)))
+      (let ((default-directory dir))
+        (setq llm-pick-source--json-cache nil)
+        (ert "llm-pick-")
+        (setq llm-pick-source--json-cache nil)))))
 
 (provide 'llm-pick-test)
 
