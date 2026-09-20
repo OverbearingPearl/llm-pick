@@ -99,26 +99,31 @@ leaderboard category via the category query parameter."
               "?category=" (url-hexify-string category))
     llm-pick-fetch-get--benchlm-url))
 
-(defvar llm-pick-source--benchlm-cache nil
-  "Short-lived in-process cache of the parsed plain leaderboard.
+(defvar llm-pick-source--json-cache nil
+  "In-process cache of parsed JSON answers keyed by URL.
 
-The leaderboard endpoint answers with every category at once, so the
-per-category collector calls share one network fetch through this cache.
-It holds a cons cell (URL . (TIME . DATA)), where TIME is the
-floating-point time at which DATA was fetched; entries older than a few
-seconds are considered stale and refetched.")
+Each entry is a cons cell (URL . (TIME . DATA)), where URL is the
+endpoint the data was fetched from, TIME is the floating-point time at
+which DATA was fetched, and DATA is the parsed JSON answer.  Entries
+fetched through `llm-pick-source--cached-json' are shared across
+callers within the process and are considered stale after 60 minutes,
+at which point the next request refetches the URL.")
 
-(defun llm-pick-source--benchlm-data ()
-  "Return the parsed plain leaderboard, caching it for 60 seconds."
-  (let ((url llm-pick-fetch-get--benchlm-url))
-    (if (and llm-pick-source--benchlm-cache
-             (equal (car llm-pick-source--benchlm-cache) url)
+(defun llm-pick-source--cached-json (url headers)
+  "Return the JSON body of URL fetched with HEADERS, parsed.
+Answers are cached in `llm-pick-source--json-cache' for 60
+minutes, so repeated collects within the hour share one network
+request per URL."
+  (let ((hit (assoc url llm-pick-source--json-cache)))
+    (if (and hit
              (< (float-time (time-subtract (current-time)
-                                           (cadr llm-pick-source--benchlm-cache)))
-                60))
-        (caddr llm-pick-source--benchlm-cache)
-      (let ((data (llm-pick-fetch-get-json url)))
-        (setq llm-pick-source--benchlm-cache (list url (current-time) data))
+                                           (cadr hit)))
+                3600))
+        (caddr hit)
+      (let ((data (llm-pick-fetch-get-json url headers)))
+        (setq llm-pick-source--json-cache
+              (cons (list url (current-time) data)
+                    (assoc-delete-all url llm-pick-source--json-cache)))
         data))))
 
 (defun llm-pick-source--benchlm-id (model)
@@ -164,7 +169,7 @@ categories and :category nil; \"overallScore\" is used only when the model has
 no numeric category score, and a model with no numeric score at all keeps no
 :score."
   (let* ((category (plist-get options :category))
-         (data (llm-pick-source--benchlm-data))
+         (data (llm-pick-source--cached-json llm-pick-fetch-get--benchlm-url nil))
          (models (llm-pick-source--json-field data "models"))
          (entries nil))
     (unless (listp models)
@@ -303,8 +308,9 @@ as \"slug <- ~alias\"."
 Only the first colon followed by a space counts, so names like
 \"GLM 5: Turbo\" keep their inner colon."
               (replace-regexp-in-string "\\`[^:]*: " "" name)))
-    (let* ((data (llm-pick-fetch-get-json llm-pick-fetch-get--openrouter-url
-                                          (llm-pick-source--openrouter-headers)))
+    (let* ((data (llm-pick-source--cached-json
+                  llm-pick-fetch-get--openrouter-url
+                  (llm-pick-source--openrouter-headers)))
            ;; The list is documented as "data"; "models" is accepted as
            ;; well, so that a differently wrapped answer is read rather
            ;; than reported as an empty catalogue.
@@ -343,7 +349,7 @@ These are the Artificial Analysis capability indices.  OPTIONS'
 \"agentic\" -> agentic_index.  When nil, emit one entry per index
 with the matching category."
   (let* ((data (llm-pick-source--json-field
-                (llm-pick-fetch-get-json
+                (llm-pick-source--cached-json
                  llm-pick-fetch-get--openrouter-benchmarks-url
                  (llm-pick-source--openrouter-headers))
                 "data"))

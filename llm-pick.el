@@ -343,7 +343,16 @@ Supported modes are `table', `frontier', `ladder', `guide', and
 
 (define-derived-mode llm-pick-report-mode special-mode "llm-pick"
   "Major mode of the `llm-pick-report' buffer."
-  (setq-local truncate-lines nil))
+  (setq-local truncate-lines nil)
+  (define-key llm-pick-report-mode-map (kbd "RET") #'llm-pick-report-ret))
+
+(defun llm-pick-report-ret ()
+  "Open the model view of the model named at point, if any."
+  (interactive)
+  (let ((record (get-text-property (point) 'llm-pick-record)))
+    (if record
+        (llm-pick-view-model record)
+      (user-error "Put the cursor on a model name first"))))
 
 (defun llm-pick--report-display (text &optional buffer-name)
   "Show TEXT in the buffer named BUFFER-NAME, or the report buffer.

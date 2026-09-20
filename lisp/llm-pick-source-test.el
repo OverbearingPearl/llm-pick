@@ -90,7 +90,7 @@ empty so nothing leaks between tests."
                  ((string-prefix-p "https://openrouter.ai/api/v1/benchmarks" url)
                   (llm-pick-core--parse-json "{\"data\": []}"))
                  (t (error "Unexpected URL in test: %s" url)))))
-             (llm-pick-source--benchlm-cache nil))
+             (llm-pick-source--json-cache nil))
      ,@body))
 
 (defun llm-pick-source-test--score-of (name records)
@@ -218,8 +218,7 @@ empty so nothing leaks between tests."
 (ert-deftest llm-pick-source-test-benchlm-loader-reads-the-leaderboard ()
   (cl-letf (((symbol-function 'llm-pick-fetch-get-json)
              (lambda (&rest _)
-  (llm-pick-core--parse-json llm-pick-source-test--leaderboard)))
-            (llm-pick-source--benchlm-cache nil))
+               (llm-pick-core--parse-json llm-pick-source-test--leaderboard))))
     (ert-info ("Creator and name make the ID; (id score category)")
       (should (equal (mapcar (lambda (entry)
                                (list (plist-get entry :id)

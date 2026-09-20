@@ -417,14 +417,33 @@ models lacking score/price degrade to ---."
                (nreverse (mapcar (lambda (l) (llm-pick-render-report--wrap l 80)) lines))
                "\n")))
 
+(defun llm-pick-render-report-scatter--open ()
+  "Open the model view for the record under point."
+  (interactive)
+  (let ((m (get-char-property (point) 'llm-pick-record)))
+    (when m (llm-pick-view-model m))))
+
+(defun llm-pick-render-report-scatter--link (m str)
+  "Return STR propertized as a link carrying the model record M."
+  (propertize str
+              'llm-pick-record m
+              'face 'link
+              'follow-link t
+              'keymap (let ((map (make-sparse-keymap)))
+                        (define-key map (kbd "RET")
+                          #'llm-pick-render-report-scatter--open)
+                        map)))
+
 (defun llm-pick-render-report-scatter (models)
   "Render MODELS as a price/capability coordinate plot.
 The vertical axis is the score, the horizontal axis the output price
 per million tokens on a logarithmic scale.  A star marks a model on
 the Pareto frontier, an O a model dominated by one of them.  The
 upper left corner is the good corner: more capability for less
-money.  Below the plot the frontier models are named with their
-score and price, so every star can be looked up."
+money.  Below the plot the models are named in two dash-introduced
+sections, frontier and dominated, each ranked by score descending,
+so every mark can be looked up.  Marks and names are links: RET
+opens the model view."
   (let* ((scored (seq-filter
                   (lambda (m)
                     (let ((s (llm-pick-core--field m 'score))
@@ -434,6 +453,12 @@ score and price, so every star can be looked up."
          (width 56)
          (height 13)
          (frontier (llm-pick-analyze--frontier scored))
+         (by-score-desc
+          (lambda (ms)
+            (sort (append ms nil)
+                  (lambda (a b)
+                    (> (llm-pick-core--field a 'score)
+                       (llm-pick-core--field b 'score))))))
          (scores (mapcar (lambda (m) (llm-pick-core--field m 'score)) scored))
          (prices (mapcar (lambda (m) (llm-pick-core--field m 'or-out)) scored))
          (s-lo (floor (apply #'min scores)))
@@ -455,37 +480,58 @@ score and price, so every star can be looked up."
                       (lhi (log (max p-hi 1e-9)))
                       (x (round (+ 1 (* (- width 3)
                                         (/ (- lp llo)
-                                           (max (- lhi llo) 1e-9)))))))
-                 (aset (nth r grid)
-                       (max 1 (min (1- width) x)) mark)))))
+                                           (max (- lhi llo) 1e-9))))))
+                      (x (max 1 (min (1- width) x)))
+                      (row (nth r grid)))
+                 (setcar (nthcdr r grid)
+                         (concat (substring row 0 x)
+                                 (llm-pick-render-report-scatter--link
+                                  m (string mark))
+                                 (substring row (min (1+ x) width))))))))
         (dolist (m scored)
           (unless (memq m frontier) (funcall place m ?o)))
         (dolist (m frontier) (funcall place m ?*)))
-      (append
-       (list "  score over price, log scale:"
-             (concat "      +" (make-string width ?-)))
-       (cl-loop for r from 0 below height
-                for s = (- s-hi
-                           (round (* r (/ (- s-hi s-lo)
-                                          (float (1- height))))))
-                collect (format "%5.0f |%s|" s (nth r grid)))
-       (list (concat "      +" (make-string width ?-))
-             (format "       $%.2f%s$%.2f/M out (log scale)"
-                     p-lo
-                     (make-string (max 1 (- width 16)) ?\s)
-                     p-hi)
-             ""
-             "  * = Pareto frontier, o = dominated by one of them;"
-             "  upper left is the good corner (more capable, cheaper)"
-             ""
-             (format "  frontier: %s"
-                     (mapconcat
-                      (lambda (m)
-                        (format "%s (%.1f, $%.2f)"
+      (let ((listed
+             (lambda (ms)
+               (let ((n 0))
+                 (mapconcat
+                  (lambda (m)
+                    (setq n (1+ n))
+                    (format "%d. %s ($%.2f)"
+                            n
+                            (llm-pick-render-report-scatter--link
+                             m (propertize
                                 (llm-pick-core--field m 'name)
-                                (llm-pick-core--field m 'score)
-                                (llm-pick-core--field m 'or-out)))
-                      frontier ", ")))))))
+                                'llm-pick-record m
+                                'face 'link))
+                            (llm-pick-core--field m 'or-out)))
+                  ms ", ")))))
+        (append
+         (list "  score over price, log scale:"
+               (concat "      +" (make-string width ?-)))
+         (cl-loop for r from 0 below height
+                  for s = (- s-hi
+                             (round (* r (/ (- s-hi s-lo)
+                                            (float (1- height))))))
+                  collect (format "%5.0f |%s|" s (nth r grid)))
+         (list (concat "      +" (make-string width ?-))
+               (format "       $%.2f%s$%.2f/M out (log scale)"
+                       p-lo
+                       (make-string (max 1 (- width 16)) ?\s)
+                       p-hi)
+               ""
+               (concat "  - frontier (*): "
+                       (funcall listed
+                                (funcall by-score-desc frontier)))
+               (concat "  - dominated (o): "
+                       (funcall listed
+                                (funcall by-score-desc
+                                         (cl-remove-if
+                                          (lambda (m) (memq m frontier))
+                                          scored))))
+               ""
+               "  RET on a mark or name opens the model view"
+               "  upper left is the good corner (more capable, cheaper)"))))))
 
 (defun llm-pick-render-report-bound (bound)
   "Return a price BOUND as a cell; nil is the open ended bucket."
