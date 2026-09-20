@@ -561,9 +561,10 @@ share first, then one section per source for what it lists alone."
 ;;; Main view commands
 
 (defun llm-pick-view-refresh ()
-  "Throw the cache away, fetch every source again and re-render."
+  "Throw the cache away, clear the JSON source cache too, then re-render."
   (interactive)
   (setq llm-pick-view--records nil)
+  (setq llm-pick-source--json-cache nil)
   (llm-pick-view-main 'refresh))
 
 ;;; Model view

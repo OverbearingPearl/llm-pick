@@ -113,14 +113,21 @@ at which point the next request refetches the URL.")
   "Return the JSON body of URL fetched with HEADERS, parsed.
 Answers are cached in `llm-pick-source--json-cache' for 60
 minutes, so repeated collects within the hour share one network
-request per URL."
+request per URL.  Only successful, non-empty answers are cached;
+a failed or empty fetch is re-raised without touching the cache."
   (let ((hit (assoc url llm-pick-source--json-cache)))
     (if (and hit
              (< (float-time (time-subtract (current-time)
                                            (cadr hit)))
                 3600))
         (caddr hit)
-      (let ((data (llm-pick-fetch-get-json url headers)))
+      (let ((data (condition-case err
+                      (llm-pick-fetch-get-json url headers)
+                    (error
+                     (signal (car err) (cdr err))))))
+        (when (or (null data)
+                  (and (sequencep data) (zerop (length data))))
+          (error "llm-pick-source: Empty or nil response from %s" url))
         (setq llm-pick-source--json-cache
               (cons (list url (current-time) data)
                     (assoc-delete-all url llm-pick-source--json-cache)))
