@@ -272,11 +272,12 @@ pseudo-models, is reported as missing.  Nil when KEY is absent."
   "Return the override entry in PRICING covering the current UTC time, or nil.
 PRICING is a parsed JSON hash table; the \"overrides\" field is looked
 up via `llm-pick-source--json-field', as are each entry's
-\"utc_start\" and \"utc_end\" fields."
+\"utc_start\" and \"utc_end\" fields.  A JSON boolean (t or :json-false)
+is not an override list and reads as nil."
   (let* ((now (decode-time (current-time) t))
          (now-hm (+ (* (nth 2 now) 100) (nth 1 now)))
          (overrides (llm-pick-source--json-field pricing "overrides")))
-    (when (listp overrides)
+    (when (consp overrides)
       (seq-find
        (lambda (ov)
          (let ((start (llm-pick-source--json-field ov "utc_start"))
