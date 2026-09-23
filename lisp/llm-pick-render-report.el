@@ -442,8 +442,8 @@ the Pareto frontier, an O a model dominated by one of them.  The
 upper left corner is the good corner: more capability for less
 money.  Below the plot the models are named in two dash-introduced
 sections, frontier and dominated, each ranked by score descending,
-so every mark can be looked up.  Marks and names are links: RET
-opens the model view."
+so every mark can be looked up; each entry carries its score and
+price.  Marks and names are links: RET opens the model view."
   (let* ((scored (seq-filter
                   (lambda (m)
                     (let ((s (llm-pick-core--field m 'score))
@@ -497,13 +497,14 @@ opens the model view."
                  (mapconcat
                   (lambda (m)
                     (setq n (1+ n))
-                    (format "%d. %s ($%.2f)"
+                    (format "%d. %s (score %.0f, $%.2f)"
                             n
                             (llm-pick-render-report-scatter--link
                              m (propertize
                                 (llm-pick-core--field m 'name)
                                 'llm-pick-record m
                                 'face 'link))
+                            (llm-pick-core--field m 'score)
                             (llm-pick-core--field m 'or-out)))
                   ms ", ")))))
         (append
