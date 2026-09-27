@@ -58,14 +58,6 @@
   "Face used to distinguish the column legend from the entries."
   :group 'llm-pick-view)
 
-(defcustom llm-pick-view-cheaper-bands '(0.9 0.8 0.5)
-  "Output price ratios naming the cheaper bands of a model view."
-  :type '(repeat number))
-
-(defcustom llm-pick-view-dearer-bands '(1.1 1.2 1.5)
-  "Output price ratios naming the dearer bands of a model view."
-  :type '(repeat number))
-
 (defvar llm-pick-view--records nil
   "The records the views are showing, as `llm-pick-collect' returns them.
 Buffer-local state is derived from this; a refresh replaces it.")
@@ -660,47 +652,80 @@ when RECORD has no :meta."
           (setq plist (cddr plist)))))
     (nreverse lines)))
 
-(defun llm-pick-view--ratio (model baseline)
-  "Return MODEL's output price as a multiple of BASELINE's, or nil."
-  (llm-pick-analyze--benchmark-ratio model baseline))
-
-(defun llm-pick-view--bands (records baseline bounds below)
-  "Return RECORDS in price-ratio bands around BASELINE.
-BOUNDS lists the band edges; BELOW selects the cheaper side, so the
-bands run under 1 on the cheap side and over 1 on the dear side.  The
-result is an alist ((TITLE . MODELS)...), empty bands left out."
-  (let* ((ratios (mapcar (lambda (model)
-                           (cons model (llm-pick-view--ratio model baseline)))
-                         records))
-         (kept (cl-remove-if-not
-                (lambda (pair)
-                  (and (cdr pair)
-                       (if below (< (cdr pair) 1) (> (cdr pair) 1))))
-                ratios))
-         (edges (if below (reverse bounds) bounds))
-         result)
-    (let ((previous (if below nil 1)))
-      (dolist (edge edges)
-        (let* ((band (cl-remove-if-not
-                      (lambda (pair)
-                        (and (cdr pair)
-                             (if below
-                                 (and (> (cdr pair) edge)
-                                      (<= (cdr pair) (or previous edge)))
-                               (and (> (cdr pair) previous)
-                                    (<= (cdr pair) edge)))))
-                      kept))
-               (title (if below
-                          (format "%.1fx - %.1fx the price" edge (or previous edge))
-                        (format "%.1fx - %.1fx the price" previous edge))))
-          (setq previous edge)
-          (when band
-            (push (cons title
-                        (mapcar #'car
-                                (sort band
-                                      (lambda (a b) (< (cdr a) (cdr b))))))
-                  result)))))
-    (nreverse result)))
+(defun llm-pick-view--neighbour-scatter (records baseline)
+  "Return scatter lines for price neighbourhood around BASELINE, or nil.
+RECORDS is the full collected set; BASELINE is the record shown by the
+model view.  Neighbours are selected purely by output price: models with
+a positive `or-out' price lying between BASELINE's price / M and
+BASELINE's price * M, always including BASELINE itself when it has a
+price.  M is chosen dynamically so the selection has between 5 and 15
+members, trying 2.0 and halving/doubling as needed, capped at 64 and
+floored at 1.125; if no exact step fits, the M whose count is closest
+to the middle of the range is used.  The result is whatever
+`llm-pick-render-report-scatter' produces, which already propertizes
+marks and names with the `llm-pick-record' text property and a RET
+keymap opening the model view."
+  (let* ((base-price (and baseline
+                          (llm-pick-core--field baseline 'or-out))))
+    (when (and base-price (numberp base-price) (> base-price 0))
+      (when (>= (length
+                 (seq-filter
+                  (lambda (rec)
+                    (let ((p (llm-pick-core--field rec 'or-out)))
+                      (and p (numberp p) (> p 0))))
+                  records))
+                2)
+        (let ((factor 2.0)
+              (tried nil)
+              best)
+          (catch 'done
+            (while t
+              (let* ((lo (/ base-price factor))
+                     (hi (* base-price factor))
+                     (sel
+                      (seq-filter
+                       (lambda (rec)
+                         (let ((p (llm-pick-core--field rec 'or-out)))
+                           (and p (numberp p) (> p 0)
+                                (>= p lo) (<= p hi))))
+                       records))
+                     (count (length sel)))
+                (push (cons factor count) tried)
+                (cond
+                 ((and (>= count 5) (<= count 15))
+                  (setq best sel)
+                  (throw 'done nil))
+                 ((or (<= factor 1.125) (>= factor 64))
+                  (throw 'done nil))
+                 ((> count 15)
+                  (setq factor (/ factor 2.0)))
+                 (t
+                  (setq factor (* factor 2.0)))))))
+          (when (and (null best) tried)
+            ;; No exact step fit in [5, 15]: pick the M whose count is
+            ;; closest to the middle of the range.
+            (let* ((mid (/ (+ 5 15) 2.0))
+                   (pick
+                    (seq-reduce
+                     (lambda (a b)
+                       (if (< (abs (- (cdr b) mid))
+                              (abs (- (cdr a) mid)))
+                           b a))
+                     tried
+                     (car tried))))
+              (setq best
+                    (let* ((lo (/ base-price (car pick)))
+                           (hi (* base-price (car pick))))
+                      (seq-filter
+                       (lambda (rec)
+                         (let ((p (llm-pick-core--field rec 'or-out)))
+                           (and p (numberp p) (> p 0)
+                                (>= p lo) (<= p hi))))
+                       records)))))
+          (when best
+            (unless (seq-find (lambda (rec) (eq rec baseline)) best)
+              (setq best (append best (list baseline))))
+            (llm-pick-render-report-scatter best)))))))
 
 (defun llm-pick-view-model (record)
   "Show the model view of RECORD in its own buffer."
@@ -714,11 +739,7 @@ result is an alist ((TITLE . MODELS)...), empty bands left out."
                       (and (not (equal other record))
                            (equal (llm-pick-core--field other 'family)
                                   family)))
-                    records)))
-         (cheaper (llm-pick-view--bands records record
-                                        llm-pick-view-cheaper-bands t))
-         (dearer (llm-pick-view--bands records record
-                                       llm-pick-view-dearer-bands nil)))
+                    records))))
     (pop-to-buffer buffer)
     (llm-pick-view-mode)
     (setq llm-pick-view--baseline record)
@@ -752,16 +773,14 @@ result is an alist ((TITLE . MODELS)...), empty bands left out."
         "Other models of the same vendor family.")
        (if kin (llm-pick-view--insert-entries kin)
          (insert "  none\n"))
-       (llm-pick-view--insert-header "Cheaper models"
-                                     "Bands by output price ratio against this model.")
-       (dolist (band cheaper)
-         (llm-pick-view--insert-header (car band))
-         (llm-pick-view--insert-entries (cdr band)))
-       (llm-pick-view--insert-header "Dearer models"
-                                     "Bands by output price ratio against this model.")
-       (dolist (band dearer)
-         (llm-pick-view--insert-header (car band))
-         (llm-pick-view--insert-entries (cdr band)))))))
+       (llm-pick-view--insert-header
+        "Price neighbourhood"
+        "Pareto frontier of models near this model's output price; RET on a mark or name opens the model view.")
+       (let ((lines (llm-pick-view--neighbour-scatter records record)))
+         (if lines
+             (dolist (line lines)
+               (insert line "\n"))
+           (insert "  none\n")))))))
 
 ;;; Compare view
 
