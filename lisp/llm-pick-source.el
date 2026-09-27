@@ -168,13 +168,20 @@ per-category calls.  The top-level numeric fields \"inputPrice\",
 \"outputPrice\", and \"cachedInputPrice\" hold per-million-token prices; when
 at least one of them is a non-negative number, the entry gets a :prices
 \& IN :out OUT :cache CACHE) attached, where each half is the field
-value when it is a non-negative number and nil otherwise.  When :category is
-non-nil, every model with a numeric score in that category is returned with
-:score/:category attached.  When :category is nil, every model with an ID is
-returned, with :score set to the best numeric score the model has across its
-categories and :category nil; \"overallScore\" is used only when the model has
-no numeric category score, and a model with no numeric score at all keeps no
-:score."
+value when it is a non-negative number and nil otherwise.  The leaderboard
+report's quality and ranking fields are collected into each entry's :meta
+plist: \"sourceType\" -> :source-type, \"evidenceStatus\" -> :evidence-status,
+\"methodologyVersion\" -> :methodology-version, and \"categoryRanks\" ->
+:category-ranks, the latter as an alist keeping only the numeric ranks of the
+JSON hash-table object keyed by category name.  Fields that are missing or
+null are left out of :meta; an entry with none of them carries no :meta at
+all.  :meta is appended onto every pushed entry just like :prices, on both
+the :category and the non-:category paths.  When :category is non-nil, every
+model with a numeric score in that category is returned with :score/:category
+attached.  When :category is nil, every model with an ID is returned, with
+:score set to the best numeric score the model has across its categories and
+:category nil; \"overallScore\" is used only when the model has no numeric
+category score, and a model with no numeric score at all keeps no :score."
   (let* ((category (plist-get options :category))
          (data (llm-pick-source--cached-json llm-pick-fetch-get--benchlm-url nil))
          (models (llm-pick-source--json-field data "models"))
@@ -190,7 +197,7 @@ no numeric category score, and a model with no numeric score at all keeps no
                 (in-price (llm-pick-source--json-field model "inputPrice"))
                 (out-price (llm-pick-source--json-field model "outputPrice"))
                 (cache-price (llm-pick-source--json-field model "cachedInputPrice"))
-                prices)
+                prices meta)
             (when (or (and (numberp in-price) (>= in-price 0))
                       (and (numberp out-price) (>= out-price 0))
                       (and (numberp cache-price) (>= cache-price 0)))
@@ -203,6 +210,24 @@ no numeric category score, and a model with no numeric score at all keeps no
                                                :cache (and (numberp cache-price)
                                                            (>= cache-price 0)
                                                            cache-price)))))
+            (let ((source-type (llm-pick-source--json-field model "sourceType"))
+                  (evidence-status (llm-pick-source--json-field model "evidenceStatus"))
+                  (methodology-version (llm-pick-source--json-field model "methodologyVersion"))
+                  (category-ranks (llm-pick-source--json-field model "categoryRanks")))
+              (when source-type
+                (setq meta (append meta (list :source-type source-type))))
+              (when evidence-status
+                (setq meta (append meta (list :evidence-status evidence-status))))
+              (when methodology-version
+                (setq meta (append meta (list :methodology-version methodology-version))))
+              (when (hash-table-p category-ranks)
+                (let (ranks)
+                  (maphash (lambda (cat rank)
+                             (when (numberp rank)
+                               (push (cons cat rank) ranks)))
+                           category-ranks)
+                  (when ranks
+                    (setq meta (append meta (list :category-ranks (nreverse ranks))))))))
             (if category
                 (let ((score (llm-pick-source--benchlm-score model category)))
                   (when (numberp score)
@@ -210,7 +235,7 @@ no numeric category score, and a model with no numeric score at all keeps no
                                         :display-name display
                                         :score score
                                         :category category)
-                                  prices)
+                                  prices meta)
                           entries)))
               (let ((best (llm-pick-source--benchlm-score model nil)))
                 (cond
@@ -219,17 +244,17 @@ no numeric category score, and a model with no numeric score at all keeps no
                                       :display-name display
                                       :score best
                                       :category nil)
-                                prices)
+                                prices meta)
                         entries))
                  ((numberp (llm-pick-source--json-field model "overallScore"))
                   (push (append (list :id id
                                       :display-name display
                                       :score (llm-pick-source--json-field model "overallScore")
                                       :category nil)
-                                prices)
+                                prices meta)
                         entries))
                  (t
-                  (push (append (list :id id :display-name display) prices)
+                  (push (append (list :id id :display-name display) prices meta)
                         entries)))))))))
     (nreverse entries)))
 
@@ -310,7 +335,12 @@ category does not change the answer.
 For a ~-prefixed alias the :providers slot still carries the raw alias
 ID; when the merge folds the alias into its canonical slug entry the
 raw ID is demoted to :provider-aliases, so the main view can show both
-as \"slug <- ~alias\"."
+as \"slug <- ~alias\".
+Each entry may also carry a :meta plist with the extra OpenRouter
+fields: :context-length, :modality, :tokenizer, :knowledge-cutoff,
+:max-completion-tokens, :reasoning-effort and :intelligence-index;
+each key is present only when the corresponding value exists and is
+non-null, and entries with none of them carry no :meta at all."
   (cl-flet ((normalized-name (name)
               "Strip a leading \"Vendor: \" prefix from NAME, BenchLM style.
 Only the first colon followed by a space counts, so names like
@@ -338,6 +368,44 @@ Only the first colon followed by a space counts, so names like
                for slug = (and alias-target
                                (llm-pick-source--json-field alias-target "slug"))
                for canonical-id = (or slug id)
+               for architecture = (llm-pick-source--json-field model "architecture")
+               for top-provider = (llm-pick-source--json-field model "top_provider")
+               for reasoning = (llm-pick-source--json-field model "reasoning")
+               for benchmarks = (llm-pick-source--json-field model "benchmarks")
+               for artificial-analysis = (and benchmarks
+                                              (llm-pick-source--json-field
+                                               benchmarks "artificial_analysis"))
+               for meta = (append
+                           (when (llm-pick-source--json-field model "context_length")
+                             (list :context-length
+                                   (llm-pick-source--json-field model "context_length")))
+                           (when (and architecture
+                                      (llm-pick-source--json-field architecture "modality"))
+                             (list :modality
+                                   (llm-pick-source--json-field architecture "modality")))
+                           (when (and architecture
+                                      (llm-pick-source--json-field architecture "tokenizer"))
+                             (list :tokenizer
+                                   (llm-pick-source--json-field architecture "tokenizer")))
+                           (when (llm-pick-source--json-field model "knowledge_cutoff")
+                             (list :knowledge-cutoff
+                                   (llm-pick-source--json-field model "knowledge_cutoff")))
+                           (when (and top-provider
+                                      (llm-pick-source--json-field
+                                       top-provider "max_completion_tokens"))
+                             (list :max-completion-tokens
+                                   (llm-pick-source--json-field
+                                    top-provider "max_completion_tokens")))
+                           (when (and reasoning
+                                      (llm-pick-source--json-field reasoning "default_effort"))
+                             (list :reasoning-effort
+                                   (llm-pick-source--json-field reasoning "default_effort")))
+                           (when (and artificial-analysis
+                                      (llm-pick-source--json-field
+                                       artificial-analysis "intelligence_index"))
+                             (list :intelligence-index
+                                   (llm-pick-source--json-field
+                                    artificial-analysis "intelligence_index"))))
                collect (append (list :id canonical-id
                                      :display-name
                                      (normalized-name
@@ -345,6 +413,7 @@ Only the first colon followed by a space counts, so names like
                                           canonical-id))
                                      :providers (list (cons 'openrouter id)))
                                (when slug (list :alias t))
+                               (when meta (list :meta meta))
                                (let ((prices (llm-pick-source--openrouter-prices model)))
                                  (when prices (list :prices prices))))))))
 
@@ -459,11 +528,11 @@ NAMES."
 
 (defun llm-pick-source--merge-entry (record source entry &optional quality)
   "Return RECORD after merging one ENTRY of SOURCE into it.
-A source contributes at most one score, one price plist and one ID per
-provider; the best-attested entry of a source wins each slot (see
-QUALITY).  An entry with a :category is keyed by the pair
-\\(SOURCE . CATEGORY\\) so its column can be read per category; only an
-entry without a category is keyed by SOURCE.
+A source contributes at most one score, one price plist, one meta
+plist and one ID per provider; the best-attested entry of a source
+wins each slot (see QUALITY).  An entry with a :category is keyed by
+the pair \\(SOURCE . CATEGORY\\) so its column can be read per
+category; only an entry without a category is keyed by SOURCE.
 
 QUALITY is a number (higher means a better-attested ID, as computed by
 the caller from the alignment entry's kind and score).  For providers,
@@ -480,18 +549,27 @@ slot, whether it came before the winner or after it, is kept so that
 the main view can show the alias pointing at the concrete version it
 was merged into.  Aliases are deduplicated: repeated merges (one per
 category, into the same record) never stack the same alias, and an
-alias never repeats the current winner's ID."
+alias never repeats the current winner's ID.
+
+An entry may also carry a :meta plist of extra per-model facts.  It is
+merged key-by-key into the record's :meta plist: only keys the record
+does not already carry are added, so the first source to report a
+field wins and repeated per-category merges never overwrite.  The
+record always carries a :meta key (initialized to the empty plist
+when absent).  Nothing in :meta affects scope or filtering."
   (let* ((score (plist-get entry :score))
          (category (plist-get entry :category))
          (score-key (if category
                         (cons source (llm-pick-core--category-name category))
                       source))
          (prices (plist-get entry :prices))
+         (meta (plist-get entry :meta))
          (providers (plist-get entry :providers))
          (name (plist-get entry :display-name))
          (aliasp (plist-get entry :alias))
          (scores (plist-get record :scores))
          (record-prices (plist-get record :prices))
+         (record-meta (or (plist-get record :meta) nil))
          (record-providers (plist-get record :providers))
          (provider-rank (plist-get record :provider-rank))
          (provider-aliases (plist-get record :provider-aliases))
@@ -501,6 +579,11 @@ alias never repeats the current winner's ID."
       (setq scores (append scores (list (cons score-key score)))))
     (when (and prices (null (alist-get source record-prices)))
       (setq record-prices (append record-prices (list (cons source prices)))))
+    (while meta
+      (let ((key (pop meta))
+            (value (pop meta)))
+        (unless (plist-member record-meta key)
+          (setq record-meta (append record-meta (list key value))))))
     (dolist (provider providers)
       (let* ((provider-name (car provider))
              (stored (assq provider-name record-providers))
@@ -558,6 +641,7 @@ alias never repeats the current winner's ID."
     ;; A record always carries these keys, so `plist-put' updates in place.
     (plist-put record :scores scores)
     (plist-put record :prices record-prices)
+    (plist-put record :meta record-meta)
     (plist-put record :providers record-providers)
     (plist-put record :provider-rank provider-rank)
     (plist-put record :provider-aliases provider-aliases)

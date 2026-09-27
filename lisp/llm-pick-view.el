@@ -124,6 +124,20 @@ This includes provider sources."
   (format (format "%%%ds" (or width 9))
           (if (numberp value) (format "%g" value) "-")))
 
+(defun llm-pick-view--compact-num (value)
+  "Render VALUE as a compact human-readable count.
+One million or more becomes one decimal followed by \"m\";
+one thousand or more becomes an integer followed by \"k\";
+smaller numbers are printed as plain integers.
+A non-number is returned as-is."
+  (cond
+   ((not (numberp value)) (format "%s" value))
+   ((>= value 1000000)
+    (format "%.1fm" (/ (float value) 1000000)))
+   ((>= value 1000)
+    (format "%dk" (/ value 1000)))
+   (t (format "%d" value))))
+
 (defun llm-pick-view--line (record)
   "Return one summary line for RECORD.
 Columns: model name, overall score, one BenchLM cell joining the 8
@@ -570,7 +584,7 @@ share first, then one section per source for what it lists alone."
 ;;; Model view
 
 (defun llm-pick-view--metadata (record)
-  "Return the metadata block of RECORD as text."
+  "Return only the identity and provider lines of RECORD as text."
   (let ((lines
          (list
           (format "ID:        %s" (llm-pick-core--field record 'name))
@@ -578,27 +592,73 @@ share first, then one section per source for what it lists alone."
           (format "Vendor:    %s" (or (llm-pick-core--field record 'vendor) "-"))
           (format "Family:    %s" (or (llm-pick-core--field record 'family) "-"))
           (format "Scope:     %s" (llm-pick-core--field record 'scope)))))
-    (dolist (key (plist-get record :scores))
-      (setq lines
-            (append lines
-                    (list
-                     (if (consp (car key))
-                         (format "Score %s/%s: %s" (caar key) (cdar key)
-                                 (cdr key))
-                       (format "Score %s: %s" (car key) (cdr key)))))))
-    (dolist (pair (plist-get record :prices))
-      (setq lines
-            (append lines
-                    (list (format "Price %s: in $%s  out $%s per M"
-                                  (car pair)
-                                  (llm-pick-view--num (cdr (assq :in (cdr pair))))
-                                  (llm-pick-view--num (cdr (assq :out (cdr pair)))))))))
     (dolist (provider (plist-get record :providers))
       (setq lines
             (append lines
                     (list (format "Provider %s: %s" (car provider)
                                   (cdr provider))))))
     (mapconcat #'identity lines "\n")))
+
+(defun llm-pick-view--score-lines (record)
+  "Return RECORD's score lines as a list of strings, or nil if none.
+RECORD's :scores slot holds an alist whose entries are
+\((SOURCE . CATEGORY) . VALUE) or (SOURCE . VALUE).  For each entry,
+produce \"Score SOURCE/CATEGORY: VALUE\" when the key is a cons,
+otherwise \"Score SOURCE: VALUE\"."
+  (let ((scores (plist-get record :scores))
+        (lines nil))
+    (dolist (entry scores)
+      (let ((key (car entry))
+            (value (cdr entry)))
+        (push (if (consp key)
+                  (format "Score %s/%s: %s" (car key) (cdr key) value)
+                (format "Score %s: %s" key value))
+              lines)))
+    (nreverse lines)))
+
+(defun llm-pick-view--price-lines (record)
+  "Return RECORD's price lines as a list of strings, or nil when none.
+Each line left-pads the source name to 10 columns so the slashes of
+successive lines line up, and renders each of the in/cache/out cells
+as exactly 7 characters right-aligned (%7.3f), or the 7-character
+\" --.---\" marker when missing — the same rendering as the main view
+price cells."
+  (let ((prices (plist-get record :prices))
+        (lines nil))
+    (when prices
+      (dolist (price prices (nreverse lines))
+        (let ((source (car price))
+              (in (plist-get (cdr price) :in))
+              (cache (plist-get (cdr price) :cache))
+              (out (plist-get (cdr price) :out)))
+          (push
+           (format "%-10s%s / %s / %s per M (in/cache/out)"
+                   source
+                   (if in (format "%7.3f" in) " --.---")
+                   (if cache (format "%7.3f" cache) " --.---")
+                   (if out (format "%7.3f" out) " --.---"))
+           lines))))))
+
+(defun llm-pick-view--meta-lines (record)
+  "Return human-readable \"key: value\" lines for RECORD's :meta plist.
+Keys are printed without their leading colon.  Values of
+:context-length and :max-completion-tokens go through
+`llm-pick-view--compact-num'; other values print as-is.  Return nil
+when RECORD has no :meta."
+  (let ((meta (plist-get record :meta))
+        (lines nil))
+    (when meta
+      (let ((plist meta))
+        (while plist
+          (let* ((key (car plist))
+                 (val (cadr plist))
+                 (name (substring (symbol-name key) 1))
+                 (pretty (if (memq key '(:context-length :max-completion-tokens))
+                             (llm-pick-view--compact-num val)
+                           val)))
+            (push (format "%s: %s" name pretty) lines))
+          (setq plist (cddr plist)))))
+    (nreverse lines)))
 
 (defun llm-pick-view--ratio (model baseline)
   "Return MODEL's output price as a multiple of BASELINE's, or nil."
@@ -666,8 +726,27 @@ result is an alist ((TITLE . MODELS)...), empty bands left out."
      'model (format "llm-pick model: %s" name)
      (lambda ()
        (insert (llm-pick-view--metadata record) "\n")
-       (llm-pick-view--insert-header "Metadata" "Everything the sources say about this model.")
-       (insert "")
+       (llm-pick-view--insert-header "Scores"
+                                     "Capability scores the sources report for this model.")
+       (let ((lines (llm-pick-view--score-lines record)))
+         (if lines
+             (dolist (line lines)
+               (insert line "\n"))
+           (insert "  none\n")))
+       (llm-pick-view--insert-header "Prices"
+                                     "Per million tokens, in/cache-hit-input/out.")
+       (let ((lines (llm-pick-view--price-lines record)))
+         (if lines
+             (dolist (line lines)
+               (insert line "\n"))
+           (insert "  none\n")))
+       (llm-pick-view--insert-header "Model details"
+                                     "Extra facts the sources report about this model.")
+       (let ((lines (llm-pick-view--meta-lines record)))
+         (if lines
+             (dolist (line lines)
+               (insert line "\n"))
+           (insert "  none\n")))
        (llm-pick-view--insert-header
         (format "Same family (%s)" (or family "unknown"))
         "Other models of the same vendor family.")
