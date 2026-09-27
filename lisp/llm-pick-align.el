@@ -392,8 +392,9 @@ canonical IDs, which are their normalized forms.
 ALIAS-PAIRS is an optional alist whose keys are (SOURCE . ID) conses
 and whose values are canonical ID strings, naming loader-declared
 alias targets that outrank similarity matching.  A paired ID maps
-straight to its paired canonical with kind `exact' and no warning;
-IDs without a pair are aligned exactly as before.
+straight to the NORMALIZED form of its paired target, so the target
+meets the anchor's model, with kind `exact' and no warning; IDs
+without a pair are aligned exactly as before.
 
 Return a plist (:mapping :warnings :standalone :promoted :entries).
 :mapping is an alist ((SOURCE . ID) . CANONICAL) that covers every
@@ -444,12 +445,12 @@ unmatched ID when `llm-pick-align-on-unmatched' is `error', and
             (let ((normalized (llm-pick-align--normalize id))
                   (alias (alist-get (cons source id) alias-pairs nil nil #'equal)))
               (if alias
-                  (progn
-                    (push (cons (cons source id) alias) other-mapping)
+                  (let ((alias-canonical (llm-pick-align--normalize alias)))
+                    (push (cons (cons source id) alias-canonical) other-mapping)
                     (push (list :source source
                                 :id id
                                 :norm normalized
-                                :canonical alias
+                                :canonical alias-canonical
                                 :kind 'exact)
                           other-entries))
                 (let* ((entry (gethash normalized promotions))

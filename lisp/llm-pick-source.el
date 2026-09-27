@@ -532,9 +532,12 @@ NAMES."
   "Return RECORD after merging one ENTRY of SOURCE into it.
 A source contributes at most one score, one price plist, one meta
 plist and one ID per provider; the best-attested entry of a source
-wins each slot (see QUALITY).  An entry with a :category is keyed by
-the pair \\(SOURCE . CATEGORY\\) so its column can be read per
-category; only an entry without a category is keyed by SOURCE.
+wins each slot: the score, price and provider slots all follow the
+best-attested entry of a source (see QUALITY), so the values shown
+always belong to the ID displayed in the provider column.  An entry
+with a :category is keyed by the pair \\(SOURCE . CATEGORY\\) so its
+column can be read per category; only an entry without a category is
+keyed by SOURCE.
 
 QUALITY is a number (higher means a better-attested ID, as computed by
 the caller from the alignment entry's kind and score).  For providers,
@@ -543,15 +546,29 @@ quality of the ID each provider name currently holds is tracked in the
 record's :provider-rank alist as (PROVIDER-NAME . QUALITY).  On an
 equal-quality tie the concrete (non-~) id displaces a ~-prefixed alias
 that is holding the slot, and the displaced alias is kept in
-:provider-aliases.  Only an entry whose :alias is non-nil contributes
-to the record's :provider-aliases list: aliases are the source's own
-alias IDs (such as a ~-prefixed latest alias), never the concrete IDs
-merged into the record itself.  Every alias that loses the provider
-slot, whether it came before the winner or after it, is kept so that
-the main view can show the alias pointing at the concrete version it
-was merged into.  Aliases are deduplicated: repeated merges (one per
-category, into the same record) never stack the same alias, and an
-alias never repeats the current winner's ID.
+:provider-aliases.  On an equal-quality tie between two concrete
+\(non-~) ids the shorter id displaces the longer one, because the
+longer spelling carries a suffix like :batch or a date while the plain
+spelling is the best-attested one; the displaced concrete id is not
+pushed into :provider-aliases.  Only an entry whose :alias is non-nil
+contributes to the record's :provider-aliases list: aliases are the
+source's own alias IDs (such as a ~-prefixed latest alias), never the
+concrete IDs merged into the record itself.  Every alias that loses
+the provider slot, whether it came before the winner or after it, is
+kept so that the main view can show the alias pointing at the concrete
+version it was merged into.  Aliases are deduplicated: repeated merges
+\\(one per category, into the same record\\) never stack the same alias,
+and an alias never repeats the current winner's ID.
+
+The best-attested entry wins the price and score slots together with
+the provider slot: when this entry's own ID ends up holding the
+provider slot, its prices replace any existing prices for the source
+and its score replaces any existing score for the same score-key; when
+the entry loses the slot, the existing prices and scores stay.  The
+quality of the entry that filled each slot is tracked alongside the
+value in the record's :score-quality and :price-quality alists.  This
+keeps the main and model views reading values that belong to the
+displayed ID rather than to a displaced alias.
 
 An entry may also carry a :meta plist of extra per-model facts.  It is
 merged key-by-key into the record's :meta plist: only keys the record
@@ -575,12 +592,20 @@ when absent).  Nothing in :meta affects scope or filtering."
          (record-providers (plist-get record :providers))
          (provider-rank (plist-get record :provider-rank))
          (provider-aliases (plist-get record :provider-aliases))
+         (score-quality (plist-get record :score-quality))
+         (price-quality (plist-get record :price-quality))
+         (entry-quality (or quality 0))
          alias-candidate
-         winner-id)
+         winner-id
+         wonp)
     (when (and score (null (assoc score-key scores)))
-      (setq scores (append scores (list (cons score-key score)))))
-    (when (and prices (null (alist-get source record-prices)))
-      (setq record-prices (append record-prices (list (cons source prices)))))
+      (setq scores (append scores (list (cons score-key score)))
+            score-quality (append score-quality
+                                  (list (cons score-key entry-quality)))))
+    (when (and prices (null (assq source record-prices)))
+      (setq record-prices (append record-prices (list (cons source prices)))
+            price-quality (append price-quality
+                                  (list (cons source entry-quality)))))
     (while meta
       (let ((key (pop meta))
             (value (pop meta)))
@@ -596,7 +621,8 @@ when absent).  Nothing in :meta affects scope or filtering."
                 provider-rank (append provider-rank
                                       (list (cons provider-name
                                                   (or quality 0))))
-                winner-id (cdr provider)))
+                winner-id (cdr provider)
+                wonp t))
          ((and quality (numberp stored-quality)
                (> quality stored-quality))
           ;; A better-attested ID takes the provider slot; an alias it
@@ -607,7 +633,27 @@ when absent).  Nothing in :meta affects scope or filtering."
                 provider-rank (cons (cons provider-name quality)
                                     (assq-delete-all provider-name
                                                      provider-rank))
-                winner-id (cdr provider)))
+                winner-id (cdr provider)
+                wonp t))
+         ((and quality (numberp stored-quality)
+               (= quality stored-quality)
+               (null aliasp)
+               (stringp (cdr provider))
+               (stringp (cdr stored))
+               (not (string-prefix-p "~" (cdr stored)))
+               (< (length (cdr provider)) (length (cdr stored))))
+          ;; On an equal-quality tie between two concrete IDs the
+          ;; shorter ID wins the slot: the longer spelling carries a
+          ;; suffix like :batch or a date while the plain spelling is
+          ;; the best-attested one.  The displaced concrete ID is not
+          ;; kept as an alias.
+          (setq record-providers (append (delete stored record-providers)
+                                         (list provider))
+                provider-rank (cons (cons provider-name quality)
+                                    (assq-delete-all provider-name
+                                                     provider-rank))
+                winner-id (cdr provider)
+                wonp t))
          ((and quality (numberp stored-quality)
                (= quality stored-quality)
                (null aliasp)
@@ -623,7 +669,8 @@ when absent).  Nothing in :meta affects scope or filtering."
                 provider-rank (cons (cons provider-name quality)
                                     (assq-delete-all provider-name
                                                      provider-rank))
-                winner-id (cdr provider)))
+                winner-id (cdr provider)
+                wonp t))
          (t
           ;; A lesser-attested ID keeps its alias next to the winner.
           (setq alias-candidate (and aliasp (cdr provider))
@@ -640,6 +687,35 @@ when absent).  Nothing in :meta affects scope or filtering."
                           (list alias-candidate))))
           (setq alias-candidate nil))))
     (setq provider-aliases (delete-dups provider-aliases))
+    ;; When this entry's own ID won the provider slot, its prices and
+    ;; score replace whatever a displaced entry (such as a ~-alias)
+    ;; had installed earlier, so the record's price and score slots
+    ;; always belong to the displayed ID.  The existing cell is
+    ;; replaced in place so the source order of both slots is kept,
+    ;; and the quality recorded for the slot is updated to this
+    ;; entry's quality.
+    (when (and wonp prices)
+      (let ((cell (assq source record-prices))
+            (qcell (assq source price-quality)))
+        (if cell
+            (setcdr cell prices)
+          (setq record-prices (append record-prices
+                                      (list (cons source prices)))))
+        (if qcell
+            (setcdr qcell entry-quality)
+          (setq price-quality (append price-quality
+                                      (list (cons source entry-quality)))))))
+    (when (and wonp score)
+      (let ((cell (assoc score-key scores))
+            (qcell (assoc score-key score-quality)))
+        (if cell
+            (setcdr cell score)
+          (setq scores (append scores (list (cons score-key score)))))
+        (if qcell
+            (setcdr qcell entry-quality)
+          (setq score-quality (append score-quality
+                                      (list (cons score-key
+                                            entry-quality)))))))
     ;; A record always carries these keys, so `plist-put' updates in place.
     (plist-put record :scores scores)
     (plist-put record :prices record-prices)
@@ -647,6 +723,8 @@ when absent).  Nothing in :meta affects scope or filtering."
     (plist-put record :providers record-providers)
     (plist-put record :provider-rank provider-rank)
     (plist-put record :provider-aliases provider-aliases)
+    (plist-put record :score-quality score-quality)
+    (plist-put record :price-quality price-quality)
     ;; Keep the canonical ID as display name until a source names it.
     (when (and name (equal (plist-get record :display-name)
                            (plist-get record :canonical)))

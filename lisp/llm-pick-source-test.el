@@ -126,30 +126,59 @@ empty so nothing leaks between tests."
         (llm-pick-align-match-ambiguity-gap 0.05)
         (llm-pick-align-on-unmatched 'standalone))
     (llm-pick-source-test--with-stubs
-      (let ((records (llm-pick-source--collect :sources '(benchlm openrouter)
-                                               :category "coding")))
-        (ert-info ("One record per canonical ID; (name score or-out scope)")
-          (should (equal (mapcar (lambda (record)
-                                   (list (llm-pick-core--field record 'name)
-                                         (llm-pick-core--field record 'score)
-                                         (llm-pick-core--field record 'or-out)
-                                         (llm-pick-core--field record 'scope)))
-                                 records)
-                         '(("acme-orphan-model" 70 nil capability-only)
-                           ("claude-3-5-sonnet" 88 15.0 both)
-                           ("gemini-1-5-flash" 82 0.3 both)
-                           ("gpt-4o" 92 15.0 both)
-                           ("gpt-4o-mini" 78 0.6 both)
-                           ("llama-3-1-8b" 65 0.1 both)
-                           ("qwen-2-5-72b" nil 0.4 price-only)))))
-        (ert-info ("Provider IDs are merged across sources; (provider . id)")
-          (should (equal (plist-get (car (cl-remove-if-not
-                                          (lambda (record)
-                                            (equal (llm-pick-core--field record 'name)
-                                                   "gpt-4o"))
-                                          records))
-                                    :providers)
-                         '((openrouter . "openai/gpt-4o")))))))))
+     (let ((records (llm-pick-source--collect
+                     :sources '(benchlm openrouter)
+                     :category "coding")))
+       (ert-info ("Records map to expected (name score or-out scope) results")
+         (should (equal
+                  '(("acme-orphan-model" 70 nil capability-only)
+                    ("claude-3-5-sonnet" 88 15.0 both)
+                    ("gemini-1-5-flash" 82 0.3 both)
+                    ("gpt-4o" 92 15.0 both)
+                    ("gpt-4o-mini" 78 0.6 both)
+                    ("llama-3-1-8b" 65 0.1 both)
+                    ("qwen-2-5-72b" nil 0.4 price-only))
+                  (mapcar (lambda (r)
+                            (list (llm-pick-core--field r 'name)
+                                  (llm-pick-core--field r 'score)
+                                  (llm-pick-core--field r 'or-out)
+                                  (llm-pick-core--field r 'scope)))
+                          records))))
+       (ert-info ("gpt-4o record carries its openrouter provider mapping")
+         (should (equal '((openrouter . "openai/gpt-4o"))
+                        (plist-get (cl-find "gpt-4o" records
+                                            :test #'equal
+                                            :key (lambda (r) (llm-pick-core--field r 'name)))
+                                   :providers))))))))
+
+(ert-deftest llm-pick-source-test-collect-same-quality-tie-prefers-plain ()
+  (let (rec1 rec2)
+    (ert-info ("Batch first, plain second: plain must win at equal quality")
+      (setq rec1 (llm-pick-core--make-record "z-ai-glm-5-3-flash"))
+      (setq rec1 (llm-pick-source--merge-entry
+                  rec1 'openrouter
+                  '(:providers ((openrouter . "z-ai/glm-5.3-flash:batch")))
+                  30))
+      (setq rec1 (llm-pick-source--merge-entry
+                  rec1 'openrouter
+                  '(:providers ((openrouter . "z-ai/glm-5.3-flash")))
+                  30))
+      (should (equal "z-ai/glm-5.3-flash"
+                     (cdr (assq 'openrouter (plist-get rec1 :providers)))))
+      (should (null (plist-get rec1 :provider-aliases))))
+    (ert-info ("Plain first, batch second: plain must stay at equal quality")
+      (setq rec2 (llm-pick-core--make-record "z-ai-glm-5-3-flash"))
+      (setq rec2 (llm-pick-source--merge-entry
+                  rec2 'openrouter
+                  '(:providers ((openrouter . "z-ai/glm-5.3-flash")))
+                  30))
+      (setq rec2 (llm-pick-source--merge-entry
+                  rec2 'openrouter
+                  '(:providers ((openrouter . "z-ai/glm-5.3-flash:batch")))
+                  30))
+      (should (equal "z-ai/glm-5.3-flash"
+                     (cdr (assq 'openrouter (plist-get rec2 :providers)))))
+      (should (null (plist-get rec2 :provider-aliases))))))
 
 (ert-deftest llm-pick-source-test-collect-category-selects-score ()
   (let ((llm-pick-core-default-capability-source 'benchlm)

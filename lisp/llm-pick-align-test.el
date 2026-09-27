@@ -408,27 +408,80 @@
         (should (equal (plist-get result :warnings) nil))
         (should (equal (plist-get result :standalone) nil))))))
 
+(ert-deftest llm-pick-align-test-prefix-boundary-rejects-non-hyphen-extension ()
+  "Check prefix boundary rejection for non-hyphen extension IDs.
+The prefix similarity function must answer nil for a normalized ID
+that extends a model name without a hyphen boundary (e.g.
+\"z-ai-glm-5-3-flashx\" vs \"z-ai-glm-5-3-flash\"), while still
+scoring a genuine hyphen extension of the same family. The full
+similarity score of the flash/flashx pair must stay below the match
+threshold, so aligning the sources leaves the extended ID unmatched."
+  (let ((llm-pick-align-match-threshold 0.85)
+        (llm-pick-align-on-unmatched 'standalone))
+    (ert-info ("Prefix function must return nil for \"z-ai-glm-5-3-flash\" vs \"z-ai-glm-5-3-flashx\" (non-hyphen extension)")
+      (should (null (llm-pick-align-similarity-prefix
+                     "z-ai-glm-5-3-flash" "z-ai-glm-5-3-flashx"))))
+    (ert-info ("Prefix function must return a number for a genuine hyphen extension \"z-ai-glm-5-3-flash\" vs \"z-ai-glm-5-3-flash-x\"")
+      (should (numberp (llm-pick-align-similarity-prefix
+                        "z-ai-glm-5-3-flash" "z-ai-glm-5-3-flash-x"))))
+    (ert-info ("Full similarity score of \"z-ai-glm-5-3-flash\" vs \"z-ai-glm-5-3-flashx\" must fall below the 0.85 threshold so the pair is not matched")
+      (should (< (llm-pick-align-similarity-score
+                  "z-ai-glm-5-3-flash" "z-ai-glm-5-3-flashx")
+                 0.85)))
+    (ert-info ("Aligning (benchlm . (\"z-ai/glm-5.3-flash\")) anchored against (openrouter . (\"z-ai/glm-5.3-flashx\")) must map the openrouter ID to \"z-ai-glm-5-3-flashx\" with entry kind unmatched")
+      (let* ((sources '((benchlm . ("z-ai/glm-5.3-flash"))
+                        (openrouter . ("z-ai/glm-5.3-flashx"))))
+             (result (llm-pick-align--align sources 'benchlm))
+             (mapping (plist-get result :mapping))
+             (entries (plist-get result :entries))
+             (mapped (cdr (assoc (cons 'openrouter "z-ai/glm-5.3-flashx")
+                                 mapping
+                                 #'equal)))
+             (entry (cl-find-if
+                     (lambda (e) (string= (plist-get e :id)
+                                          "z-ai/glm-5.3-flashx"))
+                     entries)))
+        (should (string= mapped "z-ai-glm-5-3-flashx"))
+        (should (eq (plist-get entry :kind) 'unmatched))))))
+
 (ert-deftest llm-pick-align-test-alias-pairs-beat-fuzzy-flashx-collision ()
-(let* ((sources '((benchlm . ("candidate-a" "candidate-b"))
-(openrouter . ("~z-ai/glm-flash-l"))))
-(alias-pairs (list (cons (cons 'openrouter "~z-ai/glm-flash-l")
-"z-ai/glm-5.3-flash")))
-(llm-pick-align-match-threshold 0.85)
-(llm-pick-align-match-ambiguity-gap 0.05)
-(llm-pick-align-on-unmatched 'standalone)
-(report (llm-pick-align--align sources 'benchlm alias-pairs))
-(mapping (plist-get report :mapping))
-(entries (plist-get report :entries))
-(key (cons 'openrouter "~z-ai/glm-flash-l"))
-(entry (cl-find-if
-(lambda (e) (equal (plist-get e :id) "~z-ai/glm-flash-l"))
-entries)))
-(ert-info ("Alias pair binding must beat fuzzy match against flashx: mapping and :entries agree on z-ai/glm-5.3-flash")
-(should (equal (cdr (assoc key mapping)) "z-ai/glm-5.3-flash"))
-(should-not (equal (cdr (assoc key mapping)) "z-ai/glm-5.3-flashx"))
-(should entry)
-(should (equal (plist-get entry :canonical) "z-ai/glm-5.3-flash"))
-(should (eq (plist-get entry :kind) 'exact)))))
+  "The alias pair binds the openrouter entry to the anchor's canonical ID; \
+the alias must win over any fuzzy prefix merge attempt."
+  (let* ((sources '((benchlm . ("z-ai/glm-5.3-flash"))
+                    (openrouter . ("~z-ai/glm-flash-l"))))
+         (alias-pairs '(((openrouter . "~z-ai/glm-flash-l") . "z-ai/glm-5.3-flash")))
+         (llm-pick-align-match-threshold 0.85)
+         (llm-pick-align-match-ambiguity-gap 0.05)
+         (llm-pick-align-on-unmatched 'standalone)
+         (result (llm-pick-align--align sources 'benchlm alias-pairs)))
+    (ert-info ("the :mapping must send \"~z-ai/glm-flash-l\" to the normalized \"z-ai-glm-5-3-flash\" \
+via the explicit alias pair, not via a fuzzy prefix merge")
+      (should (string-equal
+               (cdr (assoc (cons 'openrouter "~z-ai/glm-flash-l")
+                           (plist-get result :mapping)
+                           #'equal))
+               "z-ai-glm-5-3-flash")))
+    (ert-info ("the :entries must record \"~z-ai/glm-flash-l\" with normalized canonical \
+\"z-ai-glm-5-3-flash\" and :kind 'exact, proving the alias pair beat the \
+fuzzy flash/flashx collision")
+      (let ((entry (cl-find-if
+                    (lambda (e) (string-equal (plist-get e :id)
+                                              "~z-ai/glm-flash-l"))
+                    (plist-get result :entries))))
+        (should entry)
+        (should (string-equal (plist-get entry :canonical)
+                              "z-ai-glm-5-3-flash"))
+        (should (eq (plist-get entry :kind) 'exact))))
+    (ert-info ("the anchor entry must exist and carry the normalized canonical \
+\"z-ai-glm-5-3-flash\" directly, proving the alias joins the anchor model \
+rather than an unnormalized record")
+      (let ((anchor-entry (cl-find-if
+                           (lambda (e) (string-equal (plist-get e :id)
+                                                     "z-ai/glm-5.3-flash"))
+                           (plist-get result :entries))))
+        (should anchor-entry)
+        (should (string-equal (plist-get anchor-entry :canonical)
+                              "z-ai-glm-5-3-flash"))))))
 
 (ert-deftest llm-pick-align-test-anchor-conflict-signals ()
   (ert-info ("Two anchor IDs normalizing alike must stop the alignment")

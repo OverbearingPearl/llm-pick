@@ -33,21 +33,42 @@ its own length and low against every versioned model of its family."
   "Return the score of a prefix match between A and B.
 One being a prefix of the other is strong evidence, so the ceiling is
 0.95, but the score is the ceiling times the coverage
-`llm-pick-align-similarity-coverage' measures: `gpt-5' against `gpt-5-6-sol'
-scores 0.43, because the two share five characters out of eleven."
+`llm-pick-align-similarity-coverage' measures: `gpt-5' against
+`gpt-5-6-sol' scores 0.43, because the two share five characters out
+of eleven.
+
+A match only counts when the longer string continues with a hyphen
+right after the shorter one ends, so the boundary does not fall
+inside a token.  For example, \"flash\" and \"flashx\" answer nil,
+because the prefix boundary splits the token \"flashx\"."
   (when (and (> (length a) 3) (> (length b) 3)
-             (or (string-prefix-p a b) (string-prefix-p b a)))
+             (or (string-prefix-p a b) (string-prefix-p b a))
+             (if (< (length a) (length b))
+                 (eq (aref b (length a)) ?-)
+               (eq (aref a (length b)) ?-)))
     (* 0.95 (llm-pick-align-similarity-coverage a b))))
 
 (defun llm-pick-align-similarity-substring (a b)
   "Return the score of a substring match between A and B.
 One containing the other says less than one starting where the other
 starts, so the ceiling is 0.90 rather than 0.95, and the coverage scales
-it the same way."
-  (when (and (> (length a) 6) (> (length b) 6)
-             (or (string-match-p (regexp-quote a) b)
-                 (string-match-p (regexp-quote b) a)))
-    (* 0.90 (llm-pick-align-similarity-coverage a b))))
+it the same way.
+A containment match only counts when, immediately after the shorter
+string ends inside the longer one, the next character is a hyphen, so
+\"flash\" is not scored against \"flashx\" even though the longer
+string contains the shorter one.  When the two strings have equal
+length this function answers nil: equal lengths only mean containment
+when the strings are actually equal, and real equality is already
+scored 1.0 by the equality scorer."
+  (when (and (> (length a) 6) (> (length b) 6))
+    (unless (= (length a) (length b))
+      (let ((shorter (if (<= (length a) (length b)) a b))
+            (longer (if (<= (length a) (length b)) b a)))
+        (let ((pos (string-match-p (regexp-quote shorter) longer)))
+          (when (and pos
+                     (or (= (+ pos (length shorter)) (length longer))
+                         (eq (aref longer (+ pos (length shorter))) ?-)))
+            (* 0.90 (llm-pick-align-similarity-coverage a b))))))))
 
 (defun llm-pick-align-similarity-token (a b)
   "Return the Jaccard score of the tokens of A and B, scaled by 0.95.
@@ -89,8 +110,25 @@ threshold, but a score the reader can rank a long list by."
       (- 1.0 (/ (float (llm-pick-align-similarity--edit-distance s1 s2)) longest)))))
 
 (defun llm-pick-align-similarity-edit-distance (a b)
-  "Return the normalized edit distance similarity of A and B."
-  (llm-pick-align-similarity--edit-distance-ratio a b))
+  "Return the normalized edit distance similarity of A and B.
+When one string is a strict prefix of the other (their lengths
+differ) and there is no hyphen at the boundary, the difference is
+a token extension such as \"flash\" vs \"flashx\", not a typo.
+The raw edit-distance ratio would still score such a pair highly,
+e.g. about 0.947, wrongly merging two distinct models, so
+return nil in that case -- the same case the prefix scorer
+refuses -- and let the pair fall through; the score wrapper turns
+that fallback into 0.0. Otherwise return the edit-distance ratio
+as before."
+  (let* ((la (length a))
+         (lb (length b))
+         (shorter (if (<= la lb) a b))
+         (longer (if (<= la lb) b a)))
+    (if (and (/= la lb)
+             (string-prefix-p shorter longer)
+             (/= (aref longer (length shorter)) ?-))
+        nil
+      (llm-pick-align-similarity--edit-distance-ratio a b))))
 
 (defvar llm-pick-align-similarity-fns
   (list #'llm-pick-align-similarity-equal
@@ -109,7 +147,11 @@ hint, and its coverage is the strength of that evidence, so a broad
 scorer must not talk the comparison back up: letting the edit distance
 have the last word on `claude-opus-4' against `claude-opus-4-7' and
 `claude-opus-4-8' scores both at 0.867 and turns a `no such model' into
-an ambiguity nobody can resolve.")
+an ambiguity nobody can resolve.  The edit distance likewise refuses to
+score a strict prefix whose boundary is not a hyphen, because a
+single-character token extension such as flashx against flash is a
+different model, not a spelling slip, and the distance ratio would
+otherwise score it 0.947.")
 
 (defun llm-pick-align-similarity-score (a b)
   "Return how similar the normalized IDs A and B are, a number in [0, 1]."
