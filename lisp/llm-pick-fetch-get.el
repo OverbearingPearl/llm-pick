@@ -44,10 +44,6 @@
 
 It is the source of the Artificial Analysis capability indices.")
 
-(defconst llm-pick-fetch-get--openrouter-benchmarks-url
-  "https://openrouter.ai/api/v1/benchmarks"
-  "Endpoint of the OpenRouter benchmarks.")
-
 (defun llm-pick-fetch-get--openrouter-auth ()
   "Return the bearer token for openrouter.ai, or nil if unavailable.
 Try, in order: the variable `llm-pick-source-openrouter-api-key',
