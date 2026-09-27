@@ -382,12 +382,18 @@ score on its own came out just under `llm-pick-align-match-threshold'."
           (list :canonical (car best) :norm normalized :kind 'fuzzy
                 :best (car best) :score best-score)))))))
 
-(defun llm-pick-align--align (sources &optional anchor)
+(defun llm-pick-align--align (sources &optional anchor alias-pairs)
   "Align model IDs across SOURCES.
 SOURCES is an alist of (SOURCE . ID-LIST).  ANCHOR names the primary
 source and defaults to the value of
 `llm-pick-core-default-capability-source'; its IDs define the
 canonical IDs, which are their normalized forms.
+
+ALIAS-PAIRS is an optional alist whose keys are (SOURCE . ID) conses
+and whose values are canonical ID strings, naming loader-declared
+alias targets that outrank similarity matching.  A paired ID maps
+straight to its paired canonical with kind `exact' and no warning;
+IDs without a pair are aligned exactly as before.
 
 Return a plist (:mapping :warnings :standalone :promoted :entries).
 :mapping is an alist ((SOURCE . ID) . CANONICAL) that covers every
@@ -399,11 +405,12 @@ kept as standalone models, :standalone lists their canonical IDs, and
 :entries is the same alignment one ID at a time, in input order and
 anchor first: a list of plists with :source, :id, :norm, :canonical,
 :kind and :score.  :kind is `anchor' for the anchor's own IDs, `exact'
-when the ID normalizes to the anchor's model, `fuzzy' when a
-similarity score matched it, `agreed' when several sources spelled it
-alike and `unmatched' when nothing matched.  The renderer prints that
-list, so that a reader can check every decision `llm-pick' made instead
-of only the ones that failed.
+when the ID normalizes to the anchor's model or is paired with a
+canonical by ALIAS-PAIRS, `fuzzy' when a similarity score matched it,
+`agreed' when several sources spelled it alike and `unmatched' when
+nothing matched.  The renderer prints that list, so that a reader can
+check every decision `llm-pick' made instead of only the ones that
+failed.
 
 Signal `llm-pick-align-conflict' for an anchor source that maps two
 different IDs onto one canonical ID, `llm-pick-align-ambiguous' for a
@@ -434,19 +441,29 @@ unmatched ID when `llm-pick-align-on-unmatched' is `error', and
       (dolist (source-entry (cl-remove anchor sources :key #'car))
         (let ((source (car source-entry)))
           (dolist (id (cdr source-entry))
-            (let* ((normalized (llm-pick-align--normalize id))
-                   (entry (gethash normalized promotions))
-                   (result (llm-pick-align--id source id index canonicals
-                                               (car-safe entry)))
-                   (canonical (plist-get result :canonical))
-                   (warning (plist-get result :warning)))
-              (when (plist-get result :promoted)
-                (push normalized promoted))
-              (when warning
-                (push warning warnings)
-                (push canonical standalone))
-              (push (llm-pick-align--entry source id result) other-entries)
-              (push (cons (cons source id) canonical) other-mapping)))))
+            (let ((normalized (llm-pick-align--normalize id))
+                  (alias (alist-get (cons source id) alias-pairs nil nil #'equal)))
+              (if alias
+                  (progn
+                    (push (cons (cons source id) alias) other-mapping)
+                    (push (list :source source
+                                :id id
+                                :norm normalized
+                                :canonical alias
+                                :kind 'exact)
+                          other-entries))
+                (let* ((entry (gethash normalized promotions))
+                       (result (llm-pick-align--id source id index canonicals
+                                                   (car-safe entry)))
+                       (canonical (plist-get result :canonical))
+                       (warning (plist-get result :warning)))
+                  (when (plist-get result :promoted)
+                    (push normalized promoted))
+                  (when warning
+                    (push warning warnings)
+                    (push canonical standalone))
+                  (push (llm-pick-align--entry source id result) other-entries)
+                  (push (cons (cons source id) canonical) other-mapping)))))))
       (let ((report (list :mapping (append anchor-mapping (nreverse other-mapping))
                           :warnings (nreverse warnings)
                           :standalone (delete-dups standalone)

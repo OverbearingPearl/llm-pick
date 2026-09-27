@@ -336,6 +336,8 @@ For a ~-prefixed alias the :providers slot still carries the raw alias
 ID; when the merge folds the alias into its canonical slug entry the
 raw ID is demoted to :provider-aliases, so the main view can show both
 as \"slug <- ~alias\".
+Entries for alias models additionally carry the alias target slug
+under the :alias-target key.
 Each entry may also carry a :meta plist with the extra OpenRouter
 fields: :context-length, :modality, :tokenizer, :knowledge-cutoff,
 :max-completion-tokens, :reasoning-effort and :intelligence-index;
@@ -412,7 +414,7 @@ Only the first colon followed by a space counts, so names like
                                       (or (llm-pick-source--json-field model "name")
                                           canonical-id))
                                      :providers (list (cons 'openrouter id)))
-                               (when slug (list :alias t))
+                               (when slug (list :alias t :alias-target slug))
                                (when meta (list :meta meta))
                                (let ((prices (llm-pick-source--openrouter-prices model)))
                                  (when prices (list :prices prices))))))))
@@ -725,7 +727,9 @@ whose IDs define the canonical IDs.
 Return the records ordered by canonical ID.  Each record carries the
 score of every capability source, the prices of every price source and
 the provider IDs of every source that named it; a record collected for
-several categories keys its scores by a pair (SOURCE . CATEGORY)."
+several categories keys its scores by a pair (SOURCE . CATEGORY).
+Loader-declared alias targets are handed to the aligner as
+authoritative exact (SOURCE . ID) pairs."
   (let* ((names (or (plist-get args :sources) (llm-pick-source--names)))
          (categories (llm-pick-source--categories (plist-get args :category))))
     (unless names
@@ -736,6 +740,13 @@ several categories keys its scores by a pair (SOURCE . CATEGORY)."
                                                     append (llm-pick-source--collect-source
                                                             name
                                                             (list :category category))))))
+           (aliases (delete-dups
+                     (cl-loop for (name . items) in entries
+                              append (cl-loop for item in items
+                                              for target = (plist-get item :alias-target)
+                                              when target
+                                              collect (cons (cons name (plist-get item :id))
+                                                            target)))))
            (anchor (llm-pick-source--collect-anchor names (plist-get args :anchor)))
            (report (llm-pick-align--align
                     (cl-loop for (name . items) in entries
@@ -744,7 +755,8 @@ several categories keys its scores by a pair (SOURCE . CATEGORY)."
                                             (mapcar (lambda (item)
                                                       (plist-get item :id))
                                                     items))))
-                    anchor)))
+                    anchor
+                    aliases)))
       (llm-pick-source--combine entries report categories))))
 
 (provide 'llm-pick-source)
