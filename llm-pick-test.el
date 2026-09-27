@@ -180,14 +180,15 @@ now."
     (when (get-buffer "*ert*")
       (kill-buffer "*ert*"))
     (if noninteractive
-        (let ((failures 0))
-          ;; `ert-run-tests-batch-and-exit' kills Emacs inside the
-          ;; protected form, so an `unwind-protect' around it never
-          ;; runs its cleanup: run the suite without exiting, drop the
-          ;; JSON cache a test may have poisoned, and only then exit.
-          (setq failures (ert-run-tests-batch "llm-pick-"))
+        ;; `ert-run-tests-batch-and-exit' kills Emacs inside the
+        ;; protected form, so an `unwind-protect' around it never
+        ;; runs its cleanup: run the suite without exiting, drop the
+        ;; JSON cache a test may have poisoned, and only then exit.
+        (let ((stats (ert-run-tests-batch "llm-pick-")))
           (setq llm-pick-source--json-cache nil)
-          (kill-emacs (if (zerop failures) 0 1)))
+          (kill-emacs (if (zerop (ert-stats-completed-unexpected stats))
+                          0
+                        1)))
       (let ((default-directory dir))
         (setq llm-pick-source--json-cache nil)
         (ert "llm-pick-")
