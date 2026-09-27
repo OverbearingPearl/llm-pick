@@ -215,6 +215,37 @@ models that two catalogues happen to name alike; 0 turns the rule off."
   :group 'llm-pick
   :type 'number)
 
+(defun llm-pick-analyze--source-cheap-strong (models source score-field)
+  "Select SOURCE's own cheap-strong pick from MODELS using SCORE-FIELD.
+Only models that SOURCE itself both prices and scores participate: a
+source's data is only ever compared against that same source's data, so
+models whose price or whose SCORE-FIELD value is missing from SOURCE are
+excluded.  Compute SOURCE's Pareto frontier with
+`llm-pick-analyze--frontier', using SOURCE as the price basis and
+SCORE-FIELD as the capability score, then return the frontier model with
+the highest capability per dollar.  Return nil when no model qualifies."
+  (let ((qualified
+         (cl-remove-if-not
+          (lambda (model)
+            (and (numberp (llm-pick-core--field model (list 'price source 'out)))
+                 (> (llm-pick-core--field model (list 'price source 'out)) 0)
+                 (numberp (llm-pick-core--field model (if (eq score-field 'score) 'score score-field)))))
+          models)))
+    (when qualified
+      (let ((frontier
+             (llm-pick-analyze--frontier qualified source score-field))
+            (best nil)
+            (best-ratio nil))
+        (dolist (model frontier)
+          (let ((price (llm-pick-core--field model (list 'price source 'out)))
+                (score (llm-pick-core--field model (if (eq score-field 'score) 'score score-field))))
+            (when (and price (> price 0) score)
+              (let ((ratio (/ score price)))
+                (when (or (null best-ratio) (> ratio best-ratio))
+                  (setq best-ratio ratio
+                        best model))))))
+        best))))
+
 (defcustom llm-pick-align-on-unmatched 'standalone
   "What to do with an ID that matches no model of the anchor source."
   :group 'llm-pick
@@ -250,8 +281,8 @@ A key outside these groups is an error instead of a silently ignored
 option.")
 
 (defconst llm-pick--pick-key-groups
-  '((:category :sources :anchor)
-    (:budget :target-score :available-on :consensus))
+  '((:category :sources :source :anchor)
+    (:budget :target-score :score-field :available-on :consensus))
   "Argument groups accepted by `llm-pick-pick'.")
 
 (defun llm-pick--report-args (args group)
@@ -313,8 +344,12 @@ ARGS is the plist the report was called with; its category,
                                                   " descending" ""))))))
     (format "=== %s ===" (mapconcat #'identity parts " | "))))
 
-(defun llm-pick--scatter-section (label models field)
+(defun llm-pick--scatter-section (label models field &optional score-field)
   "Return one scatter chart section headed by LABEL over MODELS for FIELD.
+
+SCORE-FIELD is the capability score field to plot; nil means the
+default score.  It is passed through to `llm-pick-render-report-scatter'
+so callers can select both the price field and the score field.
 
 The heading is a single rule line: twelve ─ characters, a space,
 the label, a space, then ─ padding so the whole line spans exactly
@@ -322,7 +357,7 @@ the label, a space, then ─ padding so the whole line spans exactly
 A blank line precedes the heading, and a blank line separates the
 heading from the chart body, which is followed by a trailing blank
 line so consecutive sections separate clearly."
-  (let* ((chart (llm-pick-render-report-scatter models field))
+  (let* ((chart (llm-pick-render-report-scatter models field score-field))
          (lw (string-width label))
          (fill (max 0 (- 60 (+ 12 1 lw 1)))))
     (format "\n%s\n\n%s\n"
@@ -347,10 +382,11 @@ Supported modes are `table', `frontier', `ladder', `guide', and
     ('scatter
      (concat
       (llm-pick--scatter-section
-       "benchlm output price" models '(price benchlm out))
+       "benchlm output price" models '(price benchlm out) '(score benchlm))
       "\n"
       (llm-pick--scatter-section
-       "openrouter output price" models '(price openrouter out))))
+       "openrouter output price" models '(price openrouter out)
+       '(score openrouter intelligence))))
     (_ (signal 'llm-pick-error
                (list (format "Unknown report mode: %S, expected one of %S"
                              (plist-get args :mode)
@@ -470,50 +506,52 @@ so that the menu can offer the query without one."
          (llm-pick-query-read-args llm-pick--report-query-prompt)))
 
 ;;;###autoload
-(defun llm-pick-cheap-strong (&optional budget target)
-  "Pick the cheap, strong model the chooser would select.
-Run `llm-pick--pick-record' with TARGET and BUDGET (defaults 75 and 5.0
-when called from Lisp; read interactively), with :consensus t, and
-message the chosen model's name, default score, output price per
-million tokens, and provider IDs.  Before messaging, display the
-candidate table via `llm-pick-report' with the same budget and target
-score in scatter mode (a price/capability coordinate plot); the plot
-marks the Pareto frontier with a star and the dominated models with an
-O, so the good corner -- more capable for less money -- is visible at
-a glance, and it now shows one price/capability chart per price source
-rather than one for the default source only, while the final verdict
-is the message's consensus result."
+(defun llm-pick-cheap-strong ()
+  "Pick and report the best cheap, strong model per price source.
+This command takes no arguments and never prompts.  First it
+shows the scatter report via `llm-pick-report' with :mode
+\\='scatter.  Then, for each price source, it computes one pick
+using `llm-pick--pick-record', which applies the
+`llm-pick-analyze--source-cheap-strong' semantics with that
+source's own score and price data: the openrouter source
+uses the (score openrouter intelligence) score field, and the
+benchlm source uses the default score field.  Finally it
+messages one line per source, naming the picked model, its score
+under that source's score field, its output price per million
+tokens, and its provider IDs.  When neither source yields a
+pick, it messages that no model could be judged."
   (interactive)
-  (unless budget
-    (setq budget (if (called-interactively-p 'any)
-                     (read-number "Budget ($ per million output tokens): " 5.0)
-                   5.0)))
-  (unless target
-    (setq target (if (called-interactively-p 'any)
-                     (read-number "Target score: " 75)
-                   75)))
-  (condition-case nil
-      (let* ((record (llm-pick--pick-record
-                      :target-score target
-                      :budget budget
-                      :consensus t))
-             (name (llm-pick-core--field record 'name))
-             (score (llm-pick-core--field record 'score))
-             (or-out (llm-pick-core--field record 'or-out))
-             (providers (llm-pick-pick--providers record)))
-        (llm-pick-report :budget budget
-                         :target-score target
-                         :mode 'scatter)
-        (message "Chosen: %s (score %.1f, $%.2f per million output tokens, providers: %s)"
-                 name score or-out
-                 (mapconcat #'identity
-                            (mapcar (lambda (pair)
-                                      (format "%s: %s" (car pair) (cdr pair)))
-                                    providers)
-                            ", ")))
-    (llm-pick-error
-     (message "No model found scoring at least %s for under $%s per million output tokens."
-              target budget))))
+  (llm-pick-report :mode 'scatter)
+  (let ((specs '((openrouter . (score openrouter intelligence))
+                 (benchlm . score)))
+        (lines nil))
+    (dolist (spec specs)
+      (let* ((source (car spec))
+             (field (cdr spec))
+             (record (condition-case nil
+                         (if (eq field 'score)
+                             (llm-pick--pick-record :source source)
+                           (llm-pick--pick-record :source source
+                                                  :score-field field))
+                       (llm-pick-error nil))))
+        (when record
+          (let* ((name (llm-pick-core--field record 'name))
+                 (score (if (eq field 'score)
+                            (llm-pick-core--field record 'score)
+                          (llm-pick-core--field record field)))
+                 (or-out (llm-pick-core--field record 'or-out))
+                 (providers (llm-pick-pick--providers record)))
+            (push (format "%s: %s (score %.1f, $%.2f per million output tokens, providers: %s)"
+                          source name score or-out
+                          (mapconcat #'identity
+                                     (mapcar (lambda (pair)
+                                               (format "%s: %s" (car pair) (cdr pair)))
+                                             providers)
+                                     ", "))
+                  lines)))))
+    (if lines
+        (message "%s" (mapconcat #'identity (nreverse lines) "\n"))
+      (message "No model could be judged."))))
 
 ;;;###autoload
 (defun llm-pick-report-benchmark (baseline &rest args)
@@ -575,7 +613,9 @@ ARGS may be given either as a flat plist, as in
 \\=(llm-pick--pick-record :budget 1.0), or as a single plist argument,
 as in \\=(llm-pick--pick-record \\='(:budget 1.0)); both forms work.
 :providers is a spelling of :available-on here too.  :consensus
-is passed through to the choice logic as well."
+is passed through to the choice logic as well.
+:source selects which catalogue's own price/score pair the choice
+is computed from, and :score-field which capability field."
   (when (and (= (length args) 1)
              (listp (car args))
              (keywordp (car (car args))))
@@ -584,11 +624,12 @@ is passed through to the choice logic as well."
   (llm-pick--check-args args llm-pick--pick-key-groups)
   (let* ((models (apply #'llm-pick-collect
                         (llm-pick--report-args
-                         args '(:category :sources :anchor))))
+                         args '(:category :sources :anchor :source))))
          (choice (apply #'llm-pick-pick--choose
                         models
                         (llm-pick--report-args
-                         args '(:budget :target-score :available-on :consensus)))))
+                         args '(:budget :target-score :available-on :consensus
+                                :source :score-field)))))
     (llm-pick-pick--find models (llm-pick-core--field choice 'name))))
 
 (defun llm-pick-pick (&rest args)

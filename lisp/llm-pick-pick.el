@@ -136,6 +136,11 @@ ARGS is a plist:
   :target-score  lowest capability score
   :available-on  providers; the result carries an ID for at least one of
                  them
+  :source        when non-nil, a comparison source: comparability and the
+                 Pareto frontier are then computed from that source's
+                 output price instead of the merged one
+  :score-field   when given together with :source, the score field of
+                 that source to compare on
   :consensus     when non-nil, rank by a consensus score: the average of
                  the ((score SOURCE) ...) fields carried by the record
                  over the sources named in
@@ -149,8 +154,12 @@ the :budget, :target-score and :available-on criteria as filtered by
 score and an output price.  Among the eligible candidates the Pareto
 frontier is computed with `llm-pick-analyze--frontier', removing models
 dominated on both axes (a strictly better model exists in score and in
-price), so reaching the target is never traded away for dominance.  The
-ranking follows the criterion that was given:
+price), so reaching the target is never traded away for dominance.
+When :source is given, both comparability via
+`llm-pick-analyze--comparable-p' and the frontier use that source's
+output price, passing on :score-field when given; otherwise the merged
+or-out behaviour is the default.  The ranking follows the criterion that
+was given:
 
   a budget alone        the most capable model that fits
   a target score alone  the cheapest model that reaches the target
@@ -163,18 +172,25 @@ budget plus the suggestion of `llm-pick-analyze--next-upgrade'."
   (let* ((budget (plist-get args :budget))
          (target-score (plist-get args :target-score))
          (consensus (plist-get args :consensus))
+         (source (plist-get args :source))
+         (score-field (plist-get args :score-field))
          (candidates (llm-pick-query-run-query
                       models
                       :budget budget
                       :target-score target-score
                       :available-on (plist-get args :available-on)))
-         (usable (cl-remove-if-not #'llm-pick-analyze--comparable-p
-                                   (copy-sequence candidates))))
+         (comparable-p (if source
+                           (lambda (m)
+                             (llm-pick-analyze--comparable-p m source score-field))
+                         #'llm-pick-analyze--comparable-p))
+         (usable (cl-remove-if-not comparable-p (copy-sequence candidates))))
     (unless usable
       (signal 'llm-pick-error
               (list (format "No model among the %d known ones satisfies %s"
                             (length models) (llm-pick-pick--criteria args)))))
-    (let* ((frontier (llm-pick-analyze--frontier usable))
+    (let* ((frontier (if source
+                         (llm-pick-analyze--frontier usable source score-field)
+                       (llm-pick-analyze--frontier usable)))
            (cheaper-only (and target-score (null budget)))
            (winner (car (sort (copy-sequence frontier)
                               (if cheaper-only

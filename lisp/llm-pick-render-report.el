@@ -434,11 +434,14 @@ models lacking score/price degrade to ---."
                           #'llm-pick-render-report-scatter--open)
                         map)))
 
-(defun llm-pick-render-report-scatter (models &optional price-field)
+(defun llm-pick-render-report-scatter (models &optional price-field score-field)
   "Render MODELS as a price/capability coordinate plot.
 The chart is priced by PRICE-FIELD (default `or-out'); pass a
 symbol or a list form such as (price benchlm out) to read another
 source's output price through `llm-pick-core--field'.
+The chart is scored by SCORE-FIELD (default `score'); pass a
+symbol or a list form such as (score openrouter intelligence) to
+read another source's capability score through `llm-pick-core--field'.
 The vertical axis is the score, the horizontal axis the output price
 per million tokens on a logarithmic scale.  A star marks a model on
 the Pareto frontier, an O a model dominated by one of them.  The
@@ -449,22 +452,24 @@ so every mark can be looked up; each entry carries its score and
 price.  Marks and names are links: RET opens the model view."
   (let* ((price-field (or price-field 'or-out))
          (price-of (lambda (m) (llm-pick-core--field m price-field)))
+         (score-field (or score-field 'score))
+         (score-of (lambda (m) (llm-pick-core--field m score-field)))
          (scored (seq-filter
                   (lambda (m)
-                    (let ((s (llm-pick-core--field m 'score))
+                    (let ((s (funcall score-of m))
                           (p (funcall price-of m)))
                       (and (numberp s) (numberp p) (> p 0))))
                   (append models nil)))
          (width 56)
          (height 13)
-         (frontier (llm-pick-analyze--frontier scored))
+         (frontier (llm-pick-analyze--frontier scored nil (or score-field 'score)))
          (by-score-desc
           (lambda (ms)
             (sort (append ms nil)
                   (lambda (a b)
-                    (> (llm-pick-core--field a 'score)
-                       (llm-pick-core--field b 'score))))))
-         (scores (mapcar (lambda (m) (llm-pick-core--field m 'score)) scored))
+                    (> (funcall score-of a)
+                       (funcall score-of b))))))
+         (scores (mapcar score-of scored))
          (prices (mapcar price-of scored))
          (s-lo (if scores (floor (apply #'min scores)) 0))
          (s-hi (if scores (ceiling (apply #'max scores)) 0))
@@ -476,7 +481,7 @@ price.  Marks and names are links: RET opens the model view."
         (list "  no model carries both a score and a positive price")
       (let ((place
              (lambda (m mark)
-               (let* ((s (llm-pick-core--field m 'score))
+               (let* ((s (funcall score-of m))
                       (p (funcall price-of m))
                       (r (round (* (1- height)
                                    (/ (- s-hi s) (float (- s-hi s-lo))))))
@@ -509,7 +514,7 @@ price.  Marks and names are links: RET opens the model view."
                                 (llm-pick-core--field m 'name)
                                 'llm-pick-record m
                                 'face 'link))
-                            (llm-pick-core--field m 'score)
+                            (funcall score-of m)
                             (funcall price-of m)))
                   ms ", ")))))
         (append

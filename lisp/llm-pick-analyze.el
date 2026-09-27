@@ -27,13 +27,16 @@
 (require 'cl-lib)
 (require 'llm-pick-core)
 
-(defun llm-pick-analyze--comparable-p (model &optional source)
-  "Return non-nil when MODEL carries both a score and an output price.
+(defun llm-pick-analyze--comparable-p (model &optional source score-field)
+  "Return non-nil when MODEL carries both a capability score and an output price.
 Make sure both values are numbers.
 Optional SOURCE selects which catalogue's output price is used:
 when non-nil, the price is read from field (price SOURCE out);
-when nil, the default source (or-out) is used."
-  (let ((score (llm-pick-core--field model 'score))
+when nil, the default source (or-out) is used.
+Optional SCORE-FIELD selects the field from which the capability score
+is read, defaulting to `score'; a caller may pass another source's
+index field to compute comparability against that source."
+  (let ((score (llm-pick-core--field model (or score-field 'score)))
         (price (if source
                    (llm-pick-core--field model `(price ,source out))
                  (llm-pick-core--field model 'or-out))))
@@ -60,17 +63,22 @@ when nil, the default source (or-out) is used."
       (setq plist (cddr plist)))
     (nreverse result)))
 
-(defun llm-pick-analyze--dominates-p (a b &optional source)
+(defun llm-pick-analyze--dominates-p (a b &optional source score-field)
   "Return non-nil when the price/capability trade of A beats that of B.
 A dominates B when A is at least as capable, costs no more, and is
 strictly better on one of the two axes.
 
 Optional SOURCE selects the price basis, exactly as in
-`llm-pick-analyze--comparable-p': nil keeps the current blended
-`or-out' price, while a non-nil SOURCE reads (price SOURCE out)
-from both models."
-  (let ((score-a (llm-pick-core--field a 'score))
-        (score-b (llm-pick-core--field b 'score))
+`llm-pick-analyze--comparable-p\\='': nil keeps the current blended
+`or-out\\='' price, while a non-nil SOURCE reads (price SOURCE out)
+from both models.
+
+Optional SCORE-FIELD, passed through exactly like SOURCE, selects
+which field supplies each model's score: when non-nil, the scores
+of both models are read with (llm-pick-core--field (or
+score-field \\='score)) instead of \\='score."
+  (let ((score-a (llm-pick-core--field a (or score-field 'score)))
+        (score-b (llm-pick-core--field b (or score-field 'score)))
         (price-a (if source
                      (llm-pick-core--field a `(price ,source out))
                    (llm-pick-core--field a 'or-out)))
@@ -83,25 +91,28 @@ from both models."
          (<= price-a price-b)
          (or (> score-a score-b) (< price-a price-b)))))
 
-(defun llm-pick-analyze--frontier (models &optional source)
+(defun llm-pick-analyze--frontier (models &optional source score-field)
   "Return the Pareto frontier of MODELS, ordered by increasing price.
 Models without a score or without a price are ignored.  Optional
 SOURCE selects the price source used throughout: when non-nil,
 comparability, dominance and the final ordering all read that
 source's output price; when nil, the merged `or-out' price is used.
-MODELS itself keeps its order: the sort runs on a copy, because
-`cl-remove-if' returns its argument when it removes nothing and
-`sort' reorders a list in place."
+Optional SCORE-FIELD selects the capability score field used by
+comparability and dominance, so the frontier can be computed
+against another source's capability score; when nil, the default
+score is used.  MODELS itself keeps its order: the sort runs on a
+copy, because `cl-remove-if' returns its argument when it removes
+nothing and `sort' reorders a list in place."
   (let* ((models (copy-sequence models))
          (price-field (or source 'or-out))
          (usable (cl-remove-if-not
                   (lambda (model)
-                    (llm-pick-analyze--comparable-p model source))
+                    (llm-pick-analyze--comparable-p model source score-field))
                   models)))
     (sort (cl-remove-if (lambda (model)
                           (cl-some (lambda (other)
                                      (and (not (eq other model))
-                                          (llm-pick-analyze--dominates-p other model source)))
+                                          (llm-pick-analyze--dominates-p other model source score-field)))
                                    usable))
                         usable)
           (lambda (a b) (< (llm-pick-core--field a price-field)

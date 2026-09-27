@@ -664,33 +664,43 @@ source's own output price (benchlm via the (price benchlm out) field,
 openrouter via (price openrouter out)).  A section is skipped entirely
 when that source prices no model in the neighbourhood.
 
-Neighbours are selected purely by that source's output price: models
-with a positive price lying between BASELINE's price / M and BASELINE's
-price * M, always including BASELINE itself when it has a price.  M is
-chosen dynamically so the selection has between 5 and 15 members,
-trying 2.0 and halving/doubling as needed, capped at 64 and floored at
-1.125; if no exact step fits, the M whose count is closest to the
-middle of the range is used.  The result is the concatenation of what
-`llm-pick-render-report-scatter' produces for each non-empty section,
-which already propertizes marks and names with the `llm-pick-record'
-text property and a RET keymap opening the model view.  Return nil
-when neither source yields anything."
+Neighbours are selected purely by that source's output price together with
+the chart's capability score: a candidate must have a positive price for the
+source and a numeric score for the chart's score field (benchlm keeps the
+default score, whose score field is nil, while the openrouter chart requires
+a numeric OpenRouter Intelligence Index via the (score openrouter
+intelligence) field).  Models with a positive price and a numeric score
+lying between BASELINE's price / M and BASELINE's price * M are selected,
+always including BASELINE itself when it qualifies.  M is chosen dynamically
+so the selection has between 5 and 15 members, trying 2.0 and
+halving/doubling as needed, capped at 64 and floored at 1.125; if no exact
+step fits, the M whose count is closest to the middle of the range is used.
+The benchlm chart keeps the default score field, while the openrouter chart
+scores by the OpenRouter Intelligence Index via the (score openrouter
+intelligence) field, so the plotted capability is the Intelligence Index
+rather than the benchlm score.  The result is the concatenation of what
+`llm-pick-render-report-scatter' produces for each non-empty section, which
+already propertizes marks and names with the `llm-pick-record' text
+property and a RET keymap opening the model view.  Return nil when neither
+source yields anything."
   (let ((sections nil))
     (dolist (source
-             '(("== BenchLM output price ==" (price benchlm out))
-               ("== OpenRouter output price ==" (price openrouter out))))
+             '(("== BenchLM output price ==" (price benchlm out) nil)
+               ("== OpenRouter output price ==" (price openrouter out)
+                (score openrouter intelligence))))
       (let* ((header (nth 0 source))
              (field (nth 1 source))
+             (score-field (nth 2 source))
+             (scoreable
+              (lambda (rec)
+                (let ((p (llm-pick-core--field rec field))
+                      (s (llm-pick-core--field rec score-field)))
+                  (and p (numberp p) (> p 0)
+                       (or (null score-field) (numberp s))))))
              (base-price (and baseline
                               (llm-pick-core--field baseline field))))
         (when (and base-price (numberp base-price) (> base-price 0))
-          (when (>= (length
-                     (seq-filter
-                      (lambda (rec)
-                        (let ((p (llm-pick-core--field rec field)))
-                          (and p (numberp p) (> p 0))))
-                      records))
-                    2)
+          (when (>= (length (seq-filter scoreable records)) 2)
             (let ((factor 2.0)
                   (tried nil)
                   best)
@@ -701,9 +711,11 @@ when neither source yields anything."
                          (sel
                           (seq-filter
                            (lambda (rec)
-                             (let ((p (llm-pick-core--field rec field)))
+                             (let ((p (llm-pick-core--field rec field))
+                                   (s (llm-pick-core--field rec score-field)))
                                (and p (numberp p) (> p 0)
-                                    (>= p lo) (<= p hi))))
+                                    (>= p lo) (<= p hi)
+                                    (or (null score-field) (numberp s)))))
                            records))
                          (count (length sel)))
                     (push (cons factor count) tried)
@@ -734,9 +746,11 @@ when neither source yields anything."
                                (hi (* base-price (car pick))))
                           (seq-filter
                            (lambda (rec)
-                             (let ((p (llm-pick-core--field rec field)))
+                             (let ((p (llm-pick-core--field rec field))
+                                   (s (llm-pick-core--field rec score-field)))
                                (and p (numberp p) (> p 0)
-                                    (>= p lo) (<= p hi))))
+                                    (>= p lo) (<= p hi)
+                                    (or (null score-field) (numberp s)))))
                            records)))))
               (when best
                 (unless (seq-find (lambda (rec) (eq rec baseline)) best)
@@ -744,7 +758,8 @@ when neither source yields anything."
                 (setq sections
                       (append sections
                               (list (vconcat (list header "")
-                                             (llm-pick-render-report-scatter best)
+                                             (llm-pick-render-report-scatter
+                                              best field score-field)
                                              (list "")))))))))))
     (when sections
       (apply #'append (mapcar (lambda (sec) (append sec nil)) sections)))))
