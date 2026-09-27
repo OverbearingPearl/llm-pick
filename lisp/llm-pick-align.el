@@ -75,6 +75,15 @@
     ("-[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" . "")
     ("-[0-9]\\{4,8\\}\\'" . "")
     ("[:/.]" . "-")
+    ;; The z-ai provider slug leaves a `z-ai-' prefix behind after the
+    ;; vendor rule has dropped `z-ai/', which would keep
+    ;; `z-ai/glm-5.3-flash' from meeting benchlm's `glm/...' records;
+    ;; strip it so both sides land on `glm-5-3-flash'.  This rule has to
+    ;; come after the punctuation rule above: benchlm's `Z.ai/' and
+    ;; openrouter's `z-ai/' only become hyphen-joined prefixes once the
+    ;; punctuation rule has turned the slash (and the dot inside `Z.ai')
+    ;; into hyphens, and only then can `\\`z-ai-' match and be stripped.
+    ("\\`z-ai-" . "")
     ;; A family word the catalogue spells twice is collapsed to one
     ;; copy: `ibm-granite/granite-4.0-h-micro' keeps one `granite' and
     ;; meets the anchor's `ibm-granite-...' spelling, and
@@ -104,6 +113,14 @@ into the other would work for the pair as well, but it would also rename
 every model only one source lists — `qwen/qwen-2.5-72b' would become
 `alibaba-qwen-2-5-72b' — and the question an alignment answers is what
 model this is, not who sells it.
+
+One vendor slug leaves a trace the vendor rule cannot remove: z.ai
+catalogues its models as `z-ai/glm-5.3-flash', and dropping the vendor
+segment leaves `z-ai-glm-5-3-flash'.  The rule that strips that `z-ai-'
+prefix runs after the punctuation rule, so the ID meets benchlm's
+`glm/...' records on `glm-5-3-flash' instead of staying unmatched.  It
+has to wait for that rule, because only the punctuation rule turns the
+slash into the hyphen that makes the prefix strippable.
 
 Whitespace becomes a dash, so a source that names a model by its display
 name (`Claude 3.5 Sonnet') meets the ID another source spells
@@ -150,7 +167,9 @@ meets benchlm's `Z.ai/GLM-4.6' and `openai/gpt-5.2-chat' meets
 
 Add a rule at the position that keeps the order meaningful, and add the ID
 pair it fixes to lisp/llm-pick-align-test.el.  Emacs regexps have no digit
-class, write [0-9] instead of the backslash-d form used by other tools."
+class, write [0-9] instead of the backslash-d form used by other tools.
+The sibling `llm-pick-core--slug' in llm-pick-core.el hardcodes the same
+aliases and has to be updated to match."
   :type '(alist :key-type regexp :value-type string)
   :group 'llm-pick)
 

@@ -165,10 +165,11 @@ OPTIONS is the plist `llm-pick-source--collect-source' passes; its :category
 selects the score, see `llm-pick-fetch-get-http'.  The endpoint answers with
 every category at once, so the fetch is shared across the collector's
 per-category calls.  The top-level numeric fields \"inputPrice\",
-\"outputPrice\", and \"cachedInputPrice\" hold per-million-token prices; when
-at least one of them is a non-negative number, the entry gets a :prices
+\"outputPrice\", and \"cachedInputPrice\" hold per-million-token prices; a
+value of zero means unknown, so only positive numbers count, and when at
+least one of them is positive the entry gets a :prices
 \& IN :out OUT :cache CACHE) attached, where each half is the field
-value when it is a non-negative number and nil otherwise.  The leaderboard
+value when it is a positive number and nil otherwise.  The leaderboard
 report's quality and ranking fields are collected into each entry's :meta
 plist: \"sourceType\" -> :source-type, \"evidenceStatus\" -> :evidence-status,
 \"methodologyVersion\" -> :methodology-version, and \"categoryRanks\" ->
@@ -198,17 +199,17 @@ category score, and a model with no numeric score at all keeps no :score."
                 (out-price (llm-pick-source--json-field model "outputPrice"))
                 (cache-price (llm-pick-source--json-field model "cachedInputPrice"))
                 prices meta)
-            (when (or (and (numberp in-price) (>= in-price 0))
-                      (and (numberp out-price) (>= out-price 0))
-                      (and (numberp cache-price) (>= cache-price 0)))
+            (when (or (and (numberp in-price) (> in-price 0))
+                      (and (numberp out-price) (> out-price 0))
+                      (and (numberp cache-price) (> cache-price 0)))
               (setq prices (list :prices (list :in (and (numberp in-price)
-                                                        (>= in-price 0)
+                                                        (> in-price 0)
                                                         in-price)
                                                :out (and (numberp out-price)
-                                                         (>= out-price 0)
+                                                         (> out-price 0)
                                                          out-price)
                                                :cache (and (numberp cache-price)
-                                                           (>= cache-price 0)
+                                                           (> cache-price 0)
                                                            cache-price)))))
             (let ((source-type (llm-pick-source--json-field model "sourceType"))
                   (evidence-status (llm-pick-source--json-field model "evidenceStatus"))

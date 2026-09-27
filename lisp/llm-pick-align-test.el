@@ -428,7 +428,7 @@ threshold, so aligning the sources leaves the extended ID unmatched."
       (should (< (llm-pick-align-similarity-score
                   "z-ai-glm-5-3-flash" "z-ai-glm-5-3-flashx")
                  0.85)))
-    (ert-info ("Aligning (benchlm . (\"z-ai/glm-5.3-flash\")) anchored against (openrouter . (\"z-ai/glm-5.3-flashx\")) must map the openrouter ID to \"z-ai-glm-5-3-flashx\" with entry kind unmatched")
+    (ert-info ("Aligning (benchlm . (\"z-ai/glm-5.3-flash\")) anchored against (openrouter . (\"z-ai/glm-5.3-flashx\")) must map the openrouter ID to \"glm-5-3-flashx\" (z-ai- prefix stripped) with entry kind unmatched")
       (let* ((sources '((benchlm . ("z-ai/glm-5.3-flash"))
                         (openrouter . ("z-ai/glm-5.3-flashx"))))
              (result (llm-pick-align--align sources 'benchlm))
@@ -441,7 +441,7 @@ threshold, so aligning the sources leaves the extended ID unmatched."
                      (lambda (e) (string= (plist-get e :id)
                                           "z-ai/glm-5.3-flashx"))
                      entries)))
-        (should (string= mapped "z-ai-glm-5-3-flashx"))
+        (should (string= mapped "glm-5-3-flashx"))
         (should (eq (plist-get entry :kind) 'unmatched))))))
 
 (ert-deftest llm-pick-align-test-alias-pairs-beat-fuzzy-flashx-collision ()
@@ -454,15 +454,15 @@ the alias must win over any fuzzy prefix merge attempt."
          (llm-pick-align-match-ambiguity-gap 0.05)
          (llm-pick-align-on-unmatched 'standalone)
          (result (llm-pick-align--align sources 'benchlm alias-pairs)))
-    (ert-info ("the :mapping must send \"~z-ai/glm-flash-l\" to the normalized \"z-ai-glm-5-3-flash\" \
+    (ert-info ("the :mapping must send \"~z-ai/glm-flash-l\" to the normalized \"glm-5-3-flash\" \
 via the explicit alias pair, not via a fuzzy prefix merge")
       (should (string-equal
                (cdr (assoc (cons 'openrouter "~z-ai/glm-flash-l")
                            (plist-get result :mapping)
                            #'equal))
-               "z-ai-glm-5-3-flash")))
+               "glm-5-3-flash")))
     (ert-info ("the :entries must record \"~z-ai/glm-flash-l\" with normalized canonical \
-\"z-ai-glm-5-3-flash\" and :kind 'exact, proving the alias pair beat the \
+\"glm-5-3-flash\" and :kind 'exact, proving the alias pair beat the \
 fuzzy flash/flashx collision")
       (let ((entry (cl-find-if
                     (lambda (e) (string-equal (plist-get e :id)
@@ -470,10 +470,10 @@ fuzzy flash/flashx collision")
                     (plist-get result :entries))))
         (should entry)
         (should (string-equal (plist-get entry :canonical)
-                              "z-ai-glm-5-3-flash"))
+                              "glm-5-3-flash"))
         (should (eq (plist-get entry :kind) 'exact))))
     (ert-info ("the anchor entry must exist and carry the normalized canonical \
-\"z-ai-glm-5-3-flash\" directly, proving the alias joins the anchor model \
+\"glm-5-3-flash\" directly, proving the alias joins the anchor model \
 rather than an unnormalized record")
       (let ((anchor-entry (cl-find-if
                            (lambda (e) (string-equal (plist-get e :id)
@@ -481,7 +481,7 @@ rather than an unnormalized record")
                            (plist-get result :entries))))
         (should anchor-entry)
         (should (string-equal (plist-get anchor-entry :canonical)
-                              "z-ai-glm-5-3-flash"))))))
+                              "glm-5-3-flash"))))))
 
 (ert-deftest llm-pick-align-test-anchor-conflict-signals ()
   (ert-info ("Two anchor IDs normalizing alike must stop the alignment")

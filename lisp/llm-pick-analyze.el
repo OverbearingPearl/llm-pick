@@ -27,11 +27,16 @@
 (require 'cl-lib)
 (require 'llm-pick-core)
 
-(defun llm-pick-analyze--comparable-p (model)
+(defun llm-pick-analyze--comparable-p (model &optional source)
   "Return non-nil when MODEL carries both a score and an output price.
-Make sure both values are numbers."
+Make sure both values are numbers.
+Optional SOURCE selects which catalogue's output price is used:
+when non-nil, the price is read from field (price SOURCE out);
+when nil, the default source (or-out) is used."
   (let ((score (llm-pick-core--field model 'score))
-        (price (llm-pick-core--field model 'or-out)))
+        (price (if source
+                   (llm-pick-core--field model `(price ,source out))
+                 (llm-pick-core--field model 'or-out))))
     (and (numberp score) (numberp price))))
 
 (defun llm-pick-analyze--name (model)
@@ -55,36 +60,52 @@ Make sure both values are numbers."
       (setq plist (cddr plist)))
     (nreverse result)))
 
-(defun llm-pick-analyze--dominates-p (a b)
+(defun llm-pick-analyze--dominates-p (a b &optional source)
   "Return non-nil when the price/capability trade of A beats that of B.
 A dominates B when A is at least as capable, costs no more, and is
-strictly better on one of the two axes."
+strictly better on one of the two axes.
+
+Optional SOURCE selects the price basis, exactly as in
+`llm-pick-analyze--comparable-p': nil keeps the current blended
+`or-out' price, while a non-nil SOURCE reads (price SOURCE out)
+from both models."
   (let ((score-a (llm-pick-core--field a 'score))
         (score-b (llm-pick-core--field b 'score))
-        (price-a (llm-pick-core--field a 'or-out))
-        (price-b (llm-pick-core--field b 'or-out)))
+        (price-a (if source
+                     (llm-pick-core--field a `(price ,source out))
+                   (llm-pick-core--field a 'or-out)))
+        (price-b (if source
+                     (llm-pick-core--field b `(price ,source out))
+                   (llm-pick-core--field b 'or-out))))
     (and (numberp score-a) (numberp score-b)
          (numberp price-a) (numberp price-b)
          (>= score-a score-b)
          (<= price-a price-b)
          (or (> score-a score-b) (< price-a price-b)))))
 
-(defun llm-pick-analyze--frontier (models)
+(defun llm-pick-analyze--frontier (models &optional source)
   "Return the Pareto frontier of MODELS, ordered by increasing price.
-Models without a score or without a price are ignored.  MODELS itself
-keeps its order: the sort runs on a copy, because `cl-remove-if'
-returns its argument when it removes nothing and `sort' reorders a list
-in place."
+Models without a score or without a price are ignored.  Optional
+SOURCE selects the price source used throughout: when non-nil,
+comparability, dominance and the final ordering all read that
+source's output price; when nil, the merged `or-out' price is used.
+MODELS itself keeps its order: the sort runs on a copy, because
+`cl-remove-if' returns its argument when it removes nothing and
+`sort' reorders a list in place."
   (let* ((models (copy-sequence models))
-         (usable (cl-remove-if-not #'llm-pick-analyze--comparable-p models)))
+         (price-field (or source 'or-out))
+         (usable (cl-remove-if-not
+                  (lambda (model)
+                    (llm-pick-analyze--comparable-p model source))
+                  models)))
     (sort (cl-remove-if (lambda (model)
                           (cl-some (lambda (other)
                                      (and (not (eq other model))
-                                          (llm-pick-analyze--dominates-p other model)))
+                                          (llm-pick-analyze--dominates-p other model source)))
                                    usable))
                         usable)
-          (lambda (a b) (< (llm-pick-core--field a 'or-out)
-                           (llm-pick-core--field b 'or-out))))))
+          (lambda (a b) (< (llm-pick-core--field a price-field)
+                           (llm-pick-core--field b price-field))))))
 
 (defun llm-pick-analyze--step-gain (from to)
   "Return the capability gained per dollar when moving from FROM to TO.

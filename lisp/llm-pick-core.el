@@ -95,6 +95,10 @@ for both instead of inventing a maker for it, while
 \(family = \"deepseek\") every DeepSeek release.
 `value' is the capability per dollar: the default score divided by the
 default source's output price, nil when either is missing.
+`or-in' and `or-out' come from the default price source, falling back
+to the secondary source when the default source carries no usable
+\(numeric) price for the model, so a model priced only by the secondary
+source still answers.
 The value is nil when M does not carry the requested information."
   (pcase field
     ('name (plist-get m :canonical))
@@ -111,8 +115,10 @@ The value is nil when M does not carry the requested information."
            (price (llm-pick-core--price m llm-pick-core-default-price-source 'out)))
        (when (and (numberp score) (numberp price) (> price 0))
          (/ score price))))
-    ('or-in (llm-pick-core--price m llm-pick-core-default-price-source 'in))
-    ('or-out (llm-pick-core--price m llm-pick-core-default-price-source 'out))
+    ('or-in (or (llm-pick-core--price m llm-pick-core-default-price-source 'in)
+                (llm-pick-core--price m llm-pick-core-secondary-price-source 'in)))
+    ('or-out (or (llm-pick-core--price m llm-pick-core-default-price-source 'out)
+                 (llm-pick-core--price m llm-pick-core-secondary-price-source 'out)))
     ('bm-in (llm-pick-core--price m llm-pick-core-secondary-price-source 'in))
     ('bm-out (llm-pick-core--price m llm-pick-core-secondary-price-source 'out))
     ('gap (llm-pick-core--price-gap m))
@@ -136,10 +142,15 @@ into the name \"nil\" and lose the score of every model."
   "Return normalized search key for TEXT.
 This key is compared by `llm-pick-core--slug-match-p'.
 This lets names such as `DeepSeek V3.2', `deepseek-v3.2', and
-`deepseek v3 2' all read as `deepseek-v3-2'."
+`deepseek v3 2' all read as `deepseek-v3-2'.
+A leading `z-ai-' provider prefix is stripped after the general
+provider-prefix strip, so `z-ai-glm-4.6' normalizes to `glm-4-6',
+in sync with `llm-pick-normalize-rules'."
   (let ((string (if (null text) "" (format "%s" text))))
     (setq string (downcase string))
     (setq string (replace-regexp-in-string "[^a-z0-9]+" "-" string))
+    (setq string (replace-regexp-in-string "\\`-+\\|-+\\'" "" string))
+    (setq string (replace-regexp-in-string "\\`z-ai-" "" string))
     (replace-regexp-in-string "\\`-+\\|-+\\'" "" string)))
 
 (defun llm-pick-core--slug-match-p (value m)
@@ -198,6 +209,8 @@ benchlm or openrouter)."
            ("granite" . "IBM")
            ("phi" . "Microsoft")
            ("glm" . "Zhipu AI")
+           ("zhipu" . "Zhipu AI")
+           ("z-ai" . "Zhipu AI")
            ("minimax" . "MiniMax")
            ("ernie" . "Baidu")
            ("hunyuan" . "Tencent")

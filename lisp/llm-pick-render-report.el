@@ -434,8 +434,11 @@ models lacking score/price degrade to ---."
                           #'llm-pick-render-report-scatter--open)
                         map)))
 
-(defun llm-pick-render-report-scatter (models)
+(defun llm-pick-render-report-scatter (models &optional price-field)
   "Render MODELS as a price/capability coordinate plot.
+The chart is priced by PRICE-FIELD (default `or-out'); pass a
+symbol or a list form such as (price benchlm out) to read another
+source's output price through `llm-pick-core--field'.
 The vertical axis is the score, the horizontal axis the output price
 per million tokens on a logarithmic scale.  A star marks a model on
 the Pareto frontier, an O a model dominated by one of them.  The
@@ -444,10 +447,12 @@ money.  Below the plot the models are named in two dash-introduced
 sections, frontier and dominated, each ranked by score descending,
 so every mark can be looked up; each entry carries its score and
 price.  Marks and names are links: RET opens the model view."
-  (let* ((scored (seq-filter
+  (let* ((price-field (or price-field 'or-out))
+         (price-of (lambda (m) (llm-pick-core--field m price-field)))
+         (scored (seq-filter
                   (lambda (m)
                     (let ((s (llm-pick-core--field m 'score))
-                          (p (llm-pick-core--field m 'or-out)))
+                          (p (funcall price-of m)))
                       (and (numberp s) (numberp p) (> p 0))))
                   (append models nil)))
          (width 56)
@@ -460,7 +465,7 @@ price.  Marks and names are links: RET opens the model view."
                     (> (llm-pick-core--field a 'score)
                        (llm-pick-core--field b 'score))))))
          (scores (mapcar (lambda (m) (llm-pick-core--field m 'score)) scored))
-         (prices (mapcar (lambda (m) (llm-pick-core--field m 'or-out)) scored))
+         (prices (mapcar price-of scored))
          (s-lo (floor (apply #'min scores)))
          (s-hi (ceiling (apply #'max scores)))
          (p-lo (apply #'min prices))
@@ -472,7 +477,7 @@ price.  Marks and names are links: RET opens the model view."
       (let ((place
              (lambda (m mark)
                (let* ((s (llm-pick-core--field m 'score))
-                      (p (llm-pick-core--field m 'or-out))
+                      (p (funcall price-of m))
                       (r (round (* (1- height)
                                    (/ (- s-hi s) (float (- s-hi s-lo))))))
                       (lp (log (max p 1e-9)))
@@ -505,7 +510,7 @@ price.  Marks and names are links: RET opens the model view."
                                 'llm-pick-record m
                                 'face 'link))
                             (llm-pick-core--field m 'score)
-                            (llm-pick-core--field m 'or-out)))
+                            (funcall price-of m)))
                   ms ", ")))))
         (append
          (list "  score over price, log scale:"

@@ -313,6 +313,23 @@ ARGS is the plist the report was called with; its category,
                                                   " descending" ""))))))
     (format "=== %s ===" (mapconcat #'identity parts " | "))))
 
+(defun llm-pick--scatter-section (label models field)
+  "Return one scatter chart section headed by LABEL over MODELS for FIELD.
+
+The heading is a single rule line: twelve ─ characters, a space,
+the label, a space, then ─ padding so the whole line spans exactly
+60 columns (longer only if the label itself exceeds the budget).
+A blank line precedes the heading, and a blank line separates the
+heading from the chart body, which is followed by a trailing blank
+line so consecutive sections separate clearly."
+  (let* ((chart (llm-pick-render-report-scatter models field))
+         (lw (string-width label))
+         (fill (max 0 (- 60 (+ 12 1 lw 1)))))
+    (format "\n%s\n\n%s\n"
+            (concat (make-string 12 ?─) " " label " "
+                    (make-string fill ?─))
+            (string-join chart "\n"))))
+
 (defun llm-pick--report-body (args models)
   "Return the rendered body of the report that ARGS asks for over MODELS.
 Supported modes are `table', `frontier', `ladder', `guide', and
@@ -327,7 +344,13 @@ Supported modes are `table', `frontier', `ladder', `guide', and
               models
               (or (plist-get args :bounds) llm-pick-report-ladder-bounds)))
     ('guide (llm-pick-render-report-budget-guide models))
-    ('scatter (llm-pick-render-report-scatter models))
+    ('scatter
+     (concat
+      (llm-pick--scatter-section
+       "benchlm output price" models '(price benchlm out))
+      "\n"
+      (llm-pick--scatter-section
+       "openrouter output price" models '(price openrouter out))))
     (_ (signal 'llm-pick-error
                (list (format "Unknown report mode: %S, expected one of %S"
                              (plist-get args :mode)
@@ -457,7 +480,9 @@ candidate table via `llm-pick-report' with the same budget and target
 score in scatter mode (a price/capability coordinate plot); the plot
 marks the Pareto frontier with a star and the dominated models with an
 O, so the good corner -- more capable for less money -- is visible at
-a glance, while the final verdict is the message's consensus result."
+a glance, and it now shows one price/capability chart per price source
+rather than one for the default source only, while the final verdict
+is the message's consensus result."
   (interactive)
   (unless budget
     (setq budget (if (called-interactively-p 'any)

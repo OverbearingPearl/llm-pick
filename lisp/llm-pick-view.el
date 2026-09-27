@@ -653,79 +653,101 @@ when RECORD has no :meta."
     (nreverse lines)))
 
 (defun llm-pick-view--neighbour-scatter (records baseline)
-  "Return scatter lines for price neighbourhood around BASELINE, or nil.
+  "Return per-source scatter lines around BASELINE, or nil.
 RECORDS is the full collected set; BASELINE is the record shown by the
-model view.  Neighbours are selected purely by output price: models with
-a positive `or-out' price lying between BASELINE's price / M and
-BASELINE's price * M, always including BASELINE itself when it has a
-price.  M is chosen dynamically so the selection has between 5 and 15
-members, trying 2.0 and halving/doubling as needed, capped at 64 and
-floored at 1.125; if no exact step fits, the M whose count is closest
-to the middle of the range is used.  The result is whatever
-`llm-pick-render-report-scatter' produces, which already propertizes
-marks and names with the `llm-pick-record' text property and a RET
-keymap opening the model view."
-  (let* ((base-price (and baseline
-                          (llm-pick-core--field baseline 'or-out))))
-    (when (and base-price (numberp base-price) (> base-price 0))
-      (when (>= (length
-                 (seq-filter
-                  (lambda (rec)
-                    (let ((p (llm-pick-core--field rec 'or-out)))
-                      (and p (numberp p) (> p 0))))
-                  records))
-                2)
-        (let ((factor 2.0)
-              (tried nil)
-              best)
-          (catch 'done
-            (while t
-              (let* ((lo (/ base-price factor))
-                     (hi (* base-price factor))
-                     (sel
-                      (seq-filter
-                       (lambda (rec)
-                         (let ((p (llm-pick-core--field rec 'or-out)))
-                           (and p (numberp p) (> p 0)
-                                (>= p lo) (<= p hi))))
-                       records))
-                     (count (length sel)))
-                (push (cons factor count) tried)
-                (cond
-                 ((and (>= count 5) (<= count 15))
-                  (setq best sel)
-                  (throw 'done nil))
-                 ((or (<= factor 1.125) (>= factor 64))
-                  (throw 'done nil))
-                 ((> count 15)
-                  (setq factor (/ factor 2.0)))
-                 (t
-                  (setq factor (* factor 2.0)))))))
-          (when (and (null best) tried)
-            ;; No exact step fit in [5, 15]: pick the M whose count is
-            ;; closest to the middle of the range.
-            (let* ((mid (/ (+ 5 15) 2.0))
-                   (pick
-                    (seq-reduce
-                     (lambda (a b)
-                       (if (< (abs (- (cdr b) mid))
-                              (abs (- (cdr a) mid)))
-                           b a))
-                     tried
-                     (car tried))))
-              (setq best
-                    (let* ((lo (/ base-price (car pick)))
-                           (hi (* base-price (car pick))))
-                      (seq-filter
-                       (lambda (rec)
-                         (let ((p (llm-pick-core--field rec 'or-out)))
-                           (and p (numberp p) (> p 0)
-                                (>= p lo) (<= p hi))))
-                       records)))))
-          (when best
-            (unless (seq-find (lambda (rec) (eq rec baseline)) best)
-              (setq best (append best (list baseline))))
-            (llm-pick-render-report-scatter best)))))))
+model view.  One chart is produced per price source, in the same style
+the report scatter uses: first a benchlm output price chart, then an
+openrouter output price chart, each as its own visually separated
+section with a \"== ... ==\" style header and a blank line.  The
+neighbourhood model selection is computed per source using that
+source's own output price (benchlm via the (price benchlm out) field,
+openrouter via (price openrouter out)).  A section is skipped entirely
+when that source prices no model in the neighbourhood.
+
+Neighbours are selected purely by that source's output price: models
+with a positive price lying between BASELINE's price / M and BASELINE's
+price * M, always including BASELINE itself when it has a price.  M is
+chosen dynamically so the selection has between 5 and 15 members,
+trying 2.0 and halving/doubling as needed, capped at 64 and floored at
+1.125; if no exact step fits, the M whose count is closest to the
+middle of the range is used.  The result is the concatenation of what
+`llm-pick-render-report-scatter' produces for each non-empty section,
+which already propertizes marks and names with the `llm-pick-record'
+text property and a RET keymap opening the model view.  Return nil
+when neither source yields anything."
+  (let ((sections nil))
+    (dolist (source
+             '(("== BenchLM output price ==" (price benchlm out))
+               ("== OpenRouter output price ==" (price openrouter out))))
+      (let* ((header (nth 0 source))
+             (field (nth 1 source))
+             (base-price (and baseline
+                              (llm-pick-core--field baseline field))))
+        (when (and base-price (numberp base-price) (> base-price 0))
+          (when (>= (length
+                     (seq-filter
+                      (lambda (rec)
+                        (let ((p (llm-pick-core--field rec field)))
+                          (and p (numberp p) (> p 0))))
+                      records))
+                    2)
+            (let ((factor 2.0)
+                  (tried nil)
+                  best)
+              (catch 'done
+                (while t
+                  (let* ((lo (/ base-price factor))
+                         (hi (* base-price factor))
+                         (sel
+                          (seq-filter
+                           (lambda (rec)
+                             (let ((p (llm-pick-core--field rec field)))
+                               (and p (numberp p) (> p 0)
+                                    (>= p lo) (<= p hi))))
+                           records))
+                         (count (length sel)))
+                    (push (cons factor count) tried)
+                    (cond
+                     ((and (>= count 5) (<= count 15))
+                      (setq best sel)
+                      (throw 'done nil))
+                     ((or (<= factor 1.125) (>= factor 64))
+                      (throw 'done nil))
+                     ((> count 15)
+                      (setq factor (/ factor 2.0)))
+                     (t
+                      (setq factor (* factor 2.0)))))))
+              (when (and (null best) tried)
+                ;; No exact step fit in [5, 15]: pick the M whose count is
+                ;; closest to the middle of the range.
+                (let* ((mid (/ (+ 5 15) 2.0))
+                       (pick
+                        (seq-reduce
+                         (lambda (a b)
+                           (if (< (abs (- (cdr b) mid))
+                                  (abs (- (cdr a) mid)))
+                               b a))
+                         tried
+                         (car tried))))
+                  (setq best
+                        (let* ((lo (/ base-price (car pick)))
+                               (hi (* base-price (car pick))))
+                          (seq-filter
+                           (lambda (rec)
+                             (let ((p (llm-pick-core--field rec field)))
+                               (and p (numberp p) (> p 0)
+                                    (>= p lo) (<= p hi))))
+                           records)))))
+              (when best
+                (unless (seq-find (lambda (rec) (eq rec baseline)) best)
+                  (setq best (append best (list baseline))))
+                (setq sections
+                      (append sections
+                              (list (vconcat (list header "")
+                                             (llm-pick-render-report-scatter best)
+                                             (list "")))))))))))
+    (when sections
+      (apply #'append (mapcar (lambda (sec) (append sec nil)) sections)))))
 
 (defun llm-pick-view-model (record)
   "Show the model view of RECORD in its own buffer."
