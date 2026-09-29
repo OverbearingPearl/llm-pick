@@ -230,10 +230,11 @@ before rendering; otherwise it renders the winner unchanged."
 ;;; Rendering primitives
 
 (defun llm-pick-view--insert-header (title &optional note)
-  "Insert a section header TITLE with an optional NOTE under it."
+  "Insert a section header TITLE with an optional NOTE under it.
+NOTE is displayed in a weaker gray footnote style via the `shadow' face."
   (let ((start (point)))
     (insert (propertize title 'face 'llm-pick-view-header-face) "\n")
-    (when note (insert note "\n"))
+    (when note (insert (propertize note 'face 'shadow) "\n"))
     (put-text-property start (point) 'llm-pick-header t)))
 
 (defun llm-pick-view--insert-columns (&optional _columns)
