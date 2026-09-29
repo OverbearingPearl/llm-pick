@@ -348,9 +348,9 @@ Entries for alias models additionally carry the alias target slug
 under the :alias-target key.
 Each entry may also carry a :meta plist with the extra OpenRouter
 fields: :context-length, :modality, :tokenizer, :knowledge-cutoff,
-:max-completion-tokens, :reasoning-effort and :intelligence-index;
-each key is present only when the corresponding value exists and is
-non-null, and entries with none of them carry no :meta at all."
+:max-completion-tokens and :reasoning-effort; each key is present only
+when the corresponding value exists and is non-null, and entries with
+none of them carry no :meta at all."
   (cl-flet ((normalized-name (name)
               "Strip a leading \"Vendor: \" prefix from NAME, BenchLM style.
 Only the first colon followed by a space counts, so names like
@@ -381,10 +381,6 @@ Only the first colon followed by a space counts, so names like
                for architecture = (llm-pick-source--json-field model "architecture")
                for top-provider = (llm-pick-source--json-field model "top_provider")
                for reasoning = (llm-pick-source--json-field model "reasoning")
-               for benchmarks = (llm-pick-source--json-field model "benchmarks")
-               for artificial-analysis = (and benchmarks
-                                              (llm-pick-source--json-field
-                                               benchmarks "artificial_analysis"))
                for meta = (append
                            (when (llm-pick-source--json-field model "context_length")
                              (list :context-length
@@ -409,13 +405,7 @@ Only the first colon followed by a space counts, so names like
                            (when (and reasoning
                                       (llm-pick-source--json-field reasoning "default_effort"))
                              (list :reasoning-effort
-                                   (llm-pick-source--json-field reasoning "default_effort")))
-                           (when (and artificial-analysis
-                                      (llm-pick-source--json-field
-                                       artificial-analysis "intelligence_index"))
-                             (list :intelligence-index
-                                   (llm-pick-source--json-field
-                                    artificial-analysis "intelligence_index"))))
+                                   (llm-pick-source--json-field reasoning "default_effort"))))
                collect (append (list :id canonical-id
                                      :display-name
                                      (normalized-name
