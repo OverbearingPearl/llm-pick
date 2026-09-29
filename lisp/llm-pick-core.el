@@ -84,30 +84,34 @@ ARGS is a plist of fields merged into the record, for instance
   "Return the value of FIELD in the model record M.
 FIELD is the symbol `name', `provider', `vendor', `family', `scope',
 `score', `value', `or-in', `or-out', `bm-in', `bm-out', `gap',
-`openrouter-id', or a list of the form \(score SOURCE), \(score SOURCE
-CATEGORY) or \(price SOURCE DIRECTION).
-`vendor' and `family' are read off the canonical ID rather than stored,
-and neither is ever guessed: `vendor' is the company the lookup table
-knows, and `family' is the first word of the model name, answered only
-for a model whose vendor is known, so an ID no vendor claims answers nil
-for both instead of inventing a maker for it, while
-\(vendor = \"anthropic\") selects every Anthropic model and
-\(family = \"deepseek\") every DeepSeek release.
+`openrouter-id', or a list of the form \\(score SOURCE), \\(score SOURCE
+CATEGORY) or \\(price SOURCE DIRECTION).
+`vendor' and `family' are read off the record rather than looked up
+from a table, and neither is ever guessed: `vendor' is the creator the
+source data supplies, and `family' is the first word of the record's
+display name (the catalogue's model name), kept in the catalogue's own
+spelling rather than lowercased, answered only for a record whose vendor
+is known, so an ID no source claims a creator for answers
+nil for both instead of inventing a maker for it, while a record with
+creator \"anthropic\" and display name beginning \"DeepSeek\" still
+selects every Anthropic model and every DeepSeek release.
 `value' is the capability per dollar: the default score divided by the
 default source's output price, nil when either is missing.
 `or-in' and `or-out' come from the default price source, falling back
 to the secondary source when the default source carries no usable
-\(numeric) price for the model, so a model priced only by the secondary
+\\(numeric) price for the model, so a model priced only by the secondary
 source still answers.
 The value is nil when M does not carry the requested information."
   (pcase field
     ('name (plist-get m :canonical))
     ('provider (caar (plist-get m :providers)))
-    ('vendor (llm-pick-core--vendor (plist-get m :canonical)))
+    ('vendor (plist-get m :vendor))
     ('family
-     (let ((id (plist-get m :canonical)))
-       (when (llm-pick-core--vendor id)
-         (car (split-string (downcase id) "-")))))
+     (when (plist-get m :vendor)
+       (car (split-string
+             (or (plist-get m :display-name)
+                 (plist-get m :canonical))
+             "[^[:alnum:]]+" t))))
     ('scope (plist-get m :scope))
     ('score (llm-pick-core--default-score m))
     ('value
@@ -166,72 +170,6 @@ in sync with `llm-pick-normalize-rules'."
                       (plist-get m :display-name))
                 (cl-loop for pair in (plist-get m :providers)
                          append (list (car pair) (cdr pair))))))))
-
-(defun llm-pick-core--vendor (model)
-  "Return the vendor brand for MODEL, or nil if it cannot be told.
-
-The vendor is the company that makes the model.  The model's family is
-the first hyphen-separated word of its lowercased ID, and the vendor is
-looked up from that family.  The lookup is a table rather than a guess,
-so an unknown name answers nil.  Never guess and never fall back to the
-capitalized first word.  The vendor is deliberately not the same
-concept as `provider' (a channel that serves an ID, see the
-:providers alist of a record) or as a source (a catalogue such as
-benchlm or openrouter)."
-  (let ((table
-         '(("claude" . "Anthropic")
-           ("gpt" . "OpenAI")
-           ("o1" . "OpenAI")
-           ("o3" . "OpenAI")
-           ("o4" . "OpenAI")
-           ("chatgpt" . "OpenAI")
-           ("gemini" . "Google")
-           ("gemma" . "Google")
-           ("palm" . "Google")
-           ("llama" . "Meta")
-           ("llava" . "Meta")
-           ("qwen" . "Alibaba")
-           ("qwq" . "Alibaba")
-           ("grok" . "xAI")
-           ("mistral" . "Mistral")
-           ("mixtral" . "Mistral")
-           ("magistral" . "Mistral")
-           ("pixtral" . "Mistral")
-           ("codestral" . "Mistral")
-           ("devstral" . "Mistral")
-           ("deepseek" . "DeepSeek")
-           ("kimi" . "Moonshot AI")
-           ("moonshot" . "Moonshot AI")
-           ("command" . "Cohere")
-           ("aya" . "Cohere")
-           ("nova" . "Amazon")
-           ("titan" . "Amazon")
-           ("granite" . "IBM")
-           ("phi" . "Microsoft")
-           ("glm" . "Zhipu AI")
-           ("zhipu" . "Zhipu AI")
-           ("z-ai" . "Zhipu AI")
-           ("minimax" . "MiniMax")
-           ("ernie" . "Baidu")
-           ("hunyuan" . "Tencent")
-           ("doubao" . "ByteDance")
-           ("seed" . "ByteDance")
-           ("nemotron" . "NVIDIA")
-           ("jamba" . "AI21")
-           ("reka" . "Reka")
-           ("dbrx" . "Databricks")
-           ("olmo" . "Allen AI")
-           ("arctic" . "Snowflake")))
-        (word (car (split-string (downcase model) "-")))
-        (best-word nil)
-        (best-brand nil))
-    (dolist (entry table best-brand)
-      (let ((candidate (car entry)))
-        (when (and (string-prefix-p candidate word)
-                   (or (not best-word)
-                       (> (length candidate) (length best-word))))
-          (setq best-word candidate)
-          (setq best-brand (cdr entry)))))))
 
 (defun llm-pick-core--score (m source category)
   "Return the capability score of M at SOURCE.

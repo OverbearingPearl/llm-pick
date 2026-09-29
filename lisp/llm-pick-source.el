@@ -175,9 +175,12 @@ plist: \"sourceType\" -> :source-type, \"evidenceStatus\" -> :evidence-status,
 \"methodologyVersion\" -> :methodology-version, and \"categoryRanks\" ->
 :category-ranks, the latter as an alist keeping only the numeric ranks of the
 JSON hash-table object keyed by category name.  Fields that are missing or
-null are left out of :meta; an entry with none of them carries no :meta at
-all.  :meta is appended onto every pushed entry just like :prices, on both
-the :category and the non-:category paths.  When :category is non-nil, every
+null are left out of :meta; an entry with none of them carries no :meta
+at all.  The model's \"creator\" field, when present, is carried on the entry
+as a :vendor key holding that string, and is omitted when the field is
+missing or null, like the other optional fields.  :meta and :vendor are
+appended onto every pushed entry just like :prices, on both the :category
+and the non-:category paths.  When :category is non-nil, every
 model with a numeric score in that category is returned with :score/:category
 attached.  When :category is nil, every model with an ID is returned, with
 :score set to the best numeric score the model has across its categories and
@@ -198,7 +201,10 @@ category score, and a model with no numeric score at all keeps no :score."
                 (in-price (llm-pick-source--json-field model "inputPrice"))
                 (out-price (llm-pick-source--json-field model "outputPrice"))
                 (cache-price (llm-pick-source--json-field model "cachedInputPrice"))
-                prices meta)
+                (vendor (llm-pick-source--json-field model "creator"))
+                prices meta vendor-plist)
+            (when vendor
+              (setq vendor-plist (list :vendor vendor)))
             (when (or (and (numberp in-price) (> in-price 0))
                       (and (numberp out-price) (> out-price 0))
                       (and (numberp cache-price) (> cache-price 0)))
@@ -236,7 +242,7 @@ category score, and a model with no numeric score at all keeps no :score."
                                         :display-name display
                                         :score score
                                         :category category)
-                                  prices meta)
+                                  prices meta vendor-plist)
                           entries)))
               (let ((best (llm-pick-source--benchlm-score model nil)))
                 (cond
@@ -245,17 +251,18 @@ category score, and a model with no numeric score at all keeps no :score."
                                       :display-name display
                                       :score best
                                       :category nil)
-                                prices meta)
+                                prices meta vendor-plist)
                         entries))
                  ((numberp (llm-pick-source--json-field model "overallScore"))
                   (push (append (list :id id
                                       :display-name display
                                       :score (llm-pick-source--json-field model "overallScore")
                                       :category nil)
-                                prices meta)
+                                prices meta vendor-plist)
                         entries))
                  (t
-                  (push (append (list :id id :display-name display) prices meta)
+                  (push (append (list :id id :display-name display)
+                                prices meta vendor-plist)
                         entries)))))))))
     (nreverse entries)))
 
@@ -576,7 +583,11 @@ merged key-by-key into the record's :meta plist: only keys the record
 does not already carry are added, so the first source to report a
 field wins and repeated per-category merges never overwrite.  The
 record always carries a :meta key (initialized to the empty plist
-when absent).  Nothing in :meta affects scope or filtering."
+when absent).  Nothing in :meta affects scope or filtering.
+
+An entry's :vendor, when non-nil, is merged into the record: the first
+source that reports a creator sets the record's :vendor, and the record
+always carries the key."
   (let* ((score (plist-get entry :score))
          (category (plist-get entry :category))
          (score-key (if category
@@ -584,12 +595,14 @@ when absent).  Nothing in :meta affects scope or filtering."
                       source))
          (prices (plist-get entry :prices))
          (meta (plist-get entry :meta))
+         (vendor (plist-get entry :vendor))
          (providers (plist-get entry :providers))
          (name (plist-get entry :display-name))
          (aliasp (plist-get entry :alias))
          (scores (plist-get record :scores))
          (record-prices (plist-get record :prices))
          (record-meta (or (plist-get record :meta) nil))
+         (record-vendor (plist-get record :vendor))
          (record-providers (plist-get record :providers))
          (provider-rank (plist-get record :provider-rank))
          (provider-aliases (plist-get record :provider-aliases))
@@ -721,11 +734,16 @@ when absent).  Nothing in :meta affects scope or filtering."
     (plist-put record :scores scores)
     (plist-put record :prices record-prices)
     (plist-put record :meta record-meta)
+    (plist-put record :vendor record-vendor)
     (plist-put record :providers record-providers)
     (plist-put record :provider-rank provider-rank)
     (plist-put record :provider-aliases provider-aliases)
     (plist-put record :score-quality score-quality)
     (plist-put record :price-quality price-quality)
+    ;; The first source that reports a creator sets the vendor.
+    (when (and vendor (null record-vendor))
+      (setq record-vendor vendor)
+      (plist-put record :vendor record-vendor))
     ;; Keep the canonical ID as display name until a source names it.
     (when (and name (equal (plist-get record :display-name)
                            (plist-get record :canonical)))
